@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   classifyIntent,
+  classifyIntentVerbose,
   llmChat,
   mintApiKey,
   parseIntentsJson,
+  parseModelReply,
+  probeLlm,
   stripThink,
   type LlmSettings,
 } from '../src/core/llm';
@@ -191,6 +194,28 @@ describe('mintApiKey', () => {
   });
 });
 
+describe('parseModelReply：模型自由回答', () => {
+  it('纯文本就是回答', () => {
+    expect(parseModelReply('你好呀，我是校园助手。')).toBe('你好呀，我是校园助手。');
+  });
+
+  it('{"reply": ...} 也认', () => {
+    expect(parseModelReply('{"reply":"想查什么？"}')).toBe('想查什么？');
+  });
+
+  it('工具调用不算回答', () => {
+    expect(parseModelReply('{"tool":"get_schedule","args":{}}')).toBeNull();
+  });
+
+  it('剥掉 think 段再判断', () => {
+    expect(parseModelReply('<think>说句你好</think>你好')).toBe('你好');
+  });
+
+  it('空内容返回 null', () => {
+    expect(parseModelReply('   ')).toBeNull();
+  });
+});
+
 describe('classifyIntent', () => {
   it('正常判定出意图', async () => {
     vi.stubGlobal(
@@ -245,5 +270,67 @@ describe('classifyIntent', () => {
       vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: '我觉得应该查成绩' } }] }), { status: 200 })),
     );
     expect(await classifyIntent('那个啥', '2026-10-21', cfg)).toBeNull();
+  });
+});
+
+describe('classifyIntentVerbose', () => {
+  it('401 不再是静默 null，而是带回可读原因', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"detail":"Invalid API key"}', { status: 401 })));
+    const got = await classifyIntentVerbose('那个啥', '2026-10-21', { ...cfg, provider: 'deepseek' });
+    expect(got.intent).toBeNull();
+    expect(got.called).toBe(true);
+    expect(got.error).toContain('API Key 无效');
+  });
+
+  it('网络不通（fetch 抛 TypeError）也带回原因', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+    const got = await classifyIntentVerbose('那个啥', '2026-10-21', { ...cfg, provider: 'deepseek' });
+    expect(got.intent).toBeNull();
+    expect(got.error).toContain('Failed to fetch');
+  });
+
+  it('没开开关 / 没填 key 时不发请求，也要说清原因', async () => {
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    const off = await classifyIntentVerbose('那个啥', '2026-10-21', { ...cfg, enabled: false });
+    expect(off).toMatchObject({ intent: null, called: false });
+    expect(off.error).toContain('没打开');
+    const noKey = await classifyIntentVerbose('那个啥', '2026-10-21', { ...cfg, apiKey: '' });
+    expect(noKey.error).toContain('API Key');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('判出来时不带 error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"tool":"get_todos"}' } }] }), { status: 200 })),
+    );
+    const got = await classifyIntentVerbose('有啥要办的', '2026-10-21', { ...cfg, provider: 'deepseek' });
+    expect(got.intent?.tool).toBe('get_todos');
+    expect(got.error).toBeUndefined();
+  });
+});
+
+describe('probeLlm', () => {
+  it('成功时回 ok + 耗时 + 模型名', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 })),
+    );
+    const got = await probeLlm({ provider: 'deepseek', apiKey: 'sk-x', model: 'deepseek-chat' });
+    expect(got).toMatchObject({ ok: true, model: 'deepseek-chat', text: 'ok' });
+    expect(got.ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it('失败时回 ok:false 和原文错误', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":{"message":"bad key"}}', { status: 401 })));
+    const got = await probeLlm({ provider: 'deepseek', apiKey: 'sk-x', model: 'deepseek-chat' });
+    expect(got.ok).toBe(false);
+    expect(got.error).toContain('bad key');
   });
 });

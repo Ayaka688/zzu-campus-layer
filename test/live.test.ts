@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { tokenMeta } from '../src/core/jwt';
+import { ask } from '../src/core/agent';
 import { CampusService } from '../src/core/services';
 
 const DIR = process.env.ZZU_TOKEN_DIR ?? '../tmp/zzu';
@@ -61,6 +62,19 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
       expect(r.room.name.length).toBeGreaterThan(0);
       expect(r.freeSections.length).toBeGreaterThan(0);
     }
+  });
+
+  it('「明天南核空教室」只回南1–南3 的教室（地点词真的生效）', async () => {
+    const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+    const got = await ask('明天南核空教室', { jwxtToken: jwxt!, ...(portal ? { portalToken: portal } : {}), today });
+    expect(got.tool).toBe('find_free_room');
+    const rooms = (got.data?.rooms ?? []) as Array<{ room: { name: string } }>;
+    if (rooms.length === 0) {
+      // 那天南核真的排满了也算通过，但文案要说明是地点范围内没找到
+      expect(got.text).toContain('南核心教学区');
+      return;
+    }
+    for (const r of rooms) expect(r.room.name).toMatch(/^南[123][_\s（(]/);
   });
 
   it('通知有标题与摘要', async () => {

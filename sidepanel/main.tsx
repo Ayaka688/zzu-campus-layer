@@ -18,7 +18,9 @@ interface Message {
   tool?: string;
   data?: Record<string, unknown>;
   error?: boolean;
-  via?: 'rule' | 'llm' | 'none';
+  via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+  /** 模型没帮上忙的原因 */
+  llmError?: string;
 }
 
 interface LlmSettings {
@@ -57,6 +59,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveNote, setSaveNote] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testNote, setTestNote] = useState('');
   const [bundle, setBundle] = useState('');
   const [bundleBusy, setBundleBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -100,7 +104,9 @@ function App() {
         tool?: string;
         data?: Record<string, unknown>;
         error?: string;
-        via?: 'rule' | 'llm' | 'none';
+        via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+        llmError?: string;
+        llmMs?: number;
       }>({
         type: 'ask',
         text: question,
@@ -114,6 +120,7 @@ function App() {
             ...(res.data!.tool ? { tool: res.data!.tool } : {}),
             ...(res.data!.data ? { data: res.data!.data } : {}),
             ...(res.data!.via ? { via: res.data!.via } : {}),
+            ...(res.data!.llmError ? { llmError: res.data!.llmError } : {}),
           },
         ]);
       } else {
@@ -150,6 +157,23 @@ function App() {
       setSaveNote(res.error ?? '没取到 key');
     }
     setTimeout(() => setSaveNote(''), 4000);
+  }
+
+  /** 直接打一次模型接口，把真实状态（通/不通、耗时、错在哪）显示出来。 */
+  async function testLlm(): Promise<void> {
+    setTesting(true);
+    setTestNote('测试中…');
+    const res = await send<{ ok: boolean; ms: number; model: string; text?: string; error?: string }>({
+      type: 'llm:test',
+      patch: { ...settings, enabled: true },
+    });
+    setTesting(false);
+    if (res.ok && res.data) {
+      const d = res.data;
+      setTestNote(d.ok ? `连通 ✓ ${d.ms}ms（${d.model} 回：${d.text || ''}）` : `失败 ✗ ${d.error ?? '未知原因'}`);
+    } else {
+      setTestNote(res.error ?? '测试失败');
+    }
   }
 
   async function makeBundle(): Promise<void> {
@@ -206,7 +230,11 @@ function App() {
             <button class="mini" onClick={() => void syncKey()} disabled={syncing}>
               {syncing ? '获取中…' : '从已登录的 DeepSeek 页面自动获取 key'}
             </button>
+            <button class="mini" onClick={() => void testLlm()} disabled={testing}>
+              {testing ? '测试中…' : '测试连接'}
+            </button>
           </div>
+          {testNote ? <p class={testNote.startsWith('连通') ? 'hint ok' : 'hint warn'}>{testNote}</p> : null}
           <p class="hint">
             模型只决定「调哪个工具」，课表通知内容仍由模板渲染。{saveNote ? ` ${saveNote}` : ''}
           </p>
@@ -268,6 +296,13 @@ function App() {
                 </a>
               )}
               {m.role === 'assistant' && !m.error && m.via === 'llm' && <em class="via">由模型判定</em>}
+            {m.role === 'assistant' && !m.error && m.via === 'llm-chat' && <em class="via">由模型回答</em>}
+              {m.role === 'assistant' && !m.error && m.llmError && (
+                <p class="hint warn">
+                  模型没帮上忙：{m.llmError}
+                  {settings.enabled ? '（在 ⚙ 里点「测试连接」看看）' : ''}
+                </p>
+              )}
               {typeof m.data?.ics === 'string' && (
                 <button
                   class="ghost"

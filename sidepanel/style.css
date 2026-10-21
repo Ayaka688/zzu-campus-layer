@@ -295,6 +295,8 @@ main {
 .settings .llm-fields .row { align-items: stretch; flex-direction: column; gap: 3px; }
 .settings .llm-fields .toggle { align-items: center; flex-direction: row; gap: 8px; }
 .settings .llm-fields .hint.warn { color: #f0b429; }
+.settings .hint.ok { color: #3fb950; }
+.settings .hint.warn { color: #f0b429; }
 .settings .hint { margin: 0; color: var(--muted, #8b949e); line-height: 1.5; }
 .settings .mini {
   background: transparent;

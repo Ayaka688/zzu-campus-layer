@@ -46,7 +46,11 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
    └─ render.*                             Markdown 模板作答（无模型）
 ```
 
-L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩成服务商表）：统一 OpenAI 兼容 `/chat/completions`，预设六家 —— 学校自建 Open WebUI（`http://chat.zzu.edu.cn/api`，模型 id `DeepSeek-R1`，用 `sk-` API Key 而非 CAS token，仅校园网 + 仅 http）+ DeepSeek 官方 / 硅基流动 / 阿里百炼 / Moonshot / OpenRouter（自带 key，HTTPS 页面可用）。默认关闭，在 `⚙`（面板或手机版）里选服务商填 key 才启用。模型只判意图，不出数据，判错最多查错工具。
+L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩成服务商表）：统一 OpenAI 兼容 `/chat/completions`，预设六家 —— 学校自建 Open WebUI（`http://chat.zzu.edu.cn/api`，模型 id `DeepSeek-R1`，用 `sk-` API Key 而非 CAS token，仅校园网 + 仅 http）+ DeepSeek 官方 / 硅基流动 / 阿里百炼 / Moonshot / OpenRouter（自带 key，HTTPS 页面可用）。默认关闭，在 `⚙`（面板或手机版）里选服务商填 key 才启用。
+
+**模型不止判意图（2026-10-21 晚改）**：同一次请求里，模型要么给 `{"tool":…}`，要么直接用中文回答（问候、自我介绍、怎么用、一般常识）。`parseModelReply` 认纯文本与 `{"reply":…}` 两种；`agent.ts` 把自由回答标成 `via:'llm-chat'`（界面徽标「由模型回答」），只有模型既不判工具也不说话时才回落到 `helpText`。为什么改：原先问「hello」只会甩一屏能力清单，用户判断不了是「坏了」还是「不认」。代价是每条未命中的话都要过一次模型（R1 11–25s，`deepseek-chat` 约 1s）。
+
+数据红线不变：模型永远不生成课表/成绩/通知正文，这些只来自学校接口 + 模板渲染。
 
 ## 3. 权限与域名（C1 修订）
 
@@ -97,7 +101,7 @@ L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩
 | 工具 | 参数（zod） | 语义 |
 | --- | --- | --- |
 | `get_schedule` | `{week?: int 0–30, day?: 'today'\|'tomorrow'\|1–7}` | 默认当前教学周；按天过滤 |
-| `find_free_room` | `{date?: YYYY-MM-DD, campus?, minSeats?, sections?: int[1–20], limit?}` | 全部教室 − 当天占用；`sections` 要求全闲 |
+| `find_free_room` | `{date?: YYYY-MM-DD, campus?, building?, minSeats?, sections?: int[1–20], limit?}` | 全部教室 − 当天占用；`sections` 要求全闲；`building` 走教室名前缀（南核=南1–南3、北核=北1–北5、物理馆=物） |
 | `search_notice` | `{keyword?, limit?}` | 标题+摘要匹配；教务处通知全文、门户 200 字摘要 |
 | `get_grades` | `{}` | 成绩/绩点 |
 | `get_exams` | `{}` | 考试安排，空则明说 |
@@ -192,6 +196,7 @@ L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩
 | 11 | 手机 PWA（2026-10-21 补测） | `npm run pwa:shot`：无头 Edge 155 + 390×844 移动视口 → 清空本地 → 点「登录态」→ 粘贴 3,496 字符同步码 → 药丸变「教务 27 天」→ 问「明天有课吗」得课表 + 校园地图（1280×2044）→ 问「今天上午的空教室」得 1-4 节空闲列表（只列前 12 间 + 「共 N 间」提示）；`tsc` 0 错、94 passed / 9 skipped、`dist/pwa/index.html` 0.93 kB、`background.js` 2.02 kB（共享 chunk 102.40 kB） |
 | 12 | 扩展同步码 + e2e 加固（2026-10-21） | `bundle:export` 从面板发出 → 3,496 字符码，解回 `{v,jwxt,portal,at}`（jwxt 1,298 字符、含门户票）；顺手修了 e2e 的一个真 bug：token 不再写进 SW target（`Runtime.evaluate` 打到已休眠的 SW 会报 `chrome is not defined`），改成在扩展页面里写并 `Page.reload`，失败路径也会 kill 掉 Edge 不再挂住端口 |
 | 13 | 服务商预设 + 相对路径（2026-10-21） | `tsc` 0 错、**101 passed / 9 skipped**；`vite build` 产物 `dist/pwa/{index.html,pwa-sw.js,pwa.webmanifest}` 且 HTML 全引用 `../assets/…`（子路径可部署）；`pwa-shot` 绿（L1 徽标「由模型判定」、2026-10-23 空教室）；`e2e` 绿（10 工具、`settings inputs:3`、`bundle:llm {provider:"school", model:"DeepSeek-R1"}`、L1 `15.6s via:llm`）；新增 4 条 `llm.test.ts` 用例（换服务商改地址、未知回落学校、402/429 文案、HTTPS+http 服务商直接放弃） |
+| 14 | 地点词 + 模型自由回答（2026-10-21 深夜） | ①`src/core/place.ts`：南核→南1–南3、北核→北1–北5、物理馆→物，按教室名前缀过滤（不用不透明的 `buildingIds`）。实网 `ask('明天南核空教室')` → `count 48`，全部 `^南[123]_`；`e2e` 新增断言 `south-core {"hasSouth":true,"leakedNorth":false}`，标题「2026-10-22 空教室 · 南核心教学区（南1–南3）」。②`parseModelReply` + `via:'llm-chat'`：问「hello」由模型直接作答（徽标「由模型回答」），不再甩能力清单。`tsc` 0 错、**134 passed / 10 skipped**、live 10/10（含新用例）、`e2e` 与 `pwa-shot` 全绿 |
 
 ## 9.1 移动端（PWA，2026-10-21 追加）
 

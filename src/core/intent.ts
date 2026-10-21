@@ -4,6 +4,7 @@
  */
 import type { ToolName } from './tools';
 import { matchServices } from './catalog';
+import { resolvePlace } from './place';
 import { addDays, todayShanghai, weekdayOf } from './util';
 
 export interface Intent {
@@ -111,12 +112,20 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     const sections = extractSections(t);
     const minSeats = extractSeats(t);
     const campus = /(主校区|南校区|北校区|东校区|西校区|新校区)/.exec(t)?.[1];
+    // 地点词（南核 / 北核 / 北1 / 物理馆）单独传给工具按教室名前缀过滤，
+    // 否则「明天南核空教室」会被当成「不限楼」，列一堆北1/北2 的教室。
+    const place = resolvePlace(t);
     const args: Record<string, unknown> = {};
     if (date) args.date = date;
     if (sections) args.sections = sections;
     if (minSeats) args.minSeats = minSeats;
     if (campus) args.campus = campus;
-    return { tool: 'find_free_room', args, reason: '关键词：空教室' };
+    if (place) args.building = place.raw;
+    return {
+      tool: 'find_free_room',
+      args,
+      reason: place ? `关键词：空教室 + 地点「${place.raw}」` : '关键词：空教室',
+    };
   }
 
   if (/成绩|绩点|分数|挂科|gpa/i.test(t)) {
@@ -184,7 +193,7 @@ export function helpText(today = todayShanghai()): string {
     '我可以直接回答这几类问题（全部走你已登录的校园账号，不需要模型）：',
     '',
     '- 课表：`这周课表` / `明天有课吗` / `第 8 周课表`',
-    '- 空教室：`明天下午的空教室` / `主校区 100 人以上的空教室` / `周三第 3-4 节哪里自习`',
+    '- 空教室：`明天下午的空教室` / `主校区 100 人以上的空教室` / `明天南核空教室` / `周三第 3-4 节哪里自习`',
     '- 通知：`最近的通知` / `查一下 AI 智能体大赛的通知`',
     '- 成绩 / 考试：`我这学期绩点` / `考试安排`',
     '- 学分：`我还差多少学分毕业` / `培养方案完成情况`',

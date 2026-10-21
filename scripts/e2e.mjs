@@ -207,7 +207,6 @@ async function main() {
   console.log(answer);
 
   // 3.4) 课表回答里要带校园地图，且图片真的被加载了（不是 404 的破图）
-  //      仓库不自带地图（版权素材），所以没放图时这里就是 found:false，不算失败。
   const map = await ui.eval(`(async () => {
     const img = document.querySelector('.map img');
     if (!img) return { found: false };
@@ -251,6 +250,36 @@ async function main() {
 
   const cardText = await ui.eval(askPanel('我卡里还有多少钱'));
   console.log('card panel:', JSON.stringify(cardText.slice(0, 160)));
+
+  // 3.47) 地点词：问「明天南核空教室」，回的必须全是南1–南3 的教室
+  const southText = await ui.eval(`(async () => {
+    const el = document.querySelector('input, textarea');
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+    if (setter) setter.call(el, '明天南核空教室');
+    else el.value = '明天南核空教室';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    el.closest('form')?.requestSubmit();
+    // 空教室要并发翻页，实测 4–6 秒，这里给到 20 秒
+    let text = '';
+    for (let i = 0; i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      const bubbles = [...document.querySelectorAll('.bubble')];
+      text = bubbles[bubbles.length - 1]?.innerText ?? '';
+      if (text && !text.includes('查询中')) break;
+    }
+    return text.slice(0, 400);
+  })()`);
+  const hasSouth = /南[123][_\s（(]/.test(southText);
+  const leakedNorth = /北[1-5][_\s（(]/.test(southText);
+  console.log(
+    'south-core:',
+    JSON.stringify({ hasSouth, leakedNorth, head: southText.split('\n').slice(0, 2).join(' / ') }),
+  );
+  if (!hasSouth && !southText.includes('南核心教学区')) {
+    throw new Error('南核空教室的回答里既没有南1–南3 的教室，也没有地点说明');
+  }
+  if (leakedNorth) throw new Error('南核空教室的回答里混进了北区的教室（地点词没生效）');
 
   const shot2 = await ui.send('Page.captureScreenshot', { format: 'png' });
   if (shot2?.data) {
@@ -367,7 +396,7 @@ async function main() {
       const started = Date.now();
       // 规则层认不出的说法，只能靠模型判意图
       const r = await chrome.runtime.sendMessage({ type: 'ask', text: '后天下午哪个屋子能让我安静看会儿书' }).catch((e) => ({ error: String(e) }));
-      const out = { ms: Date.now() - started, via: r?.data?.via ?? null, tool: r?.data?.tool ?? null, err: r?.data?.error ?? (r?.error ? String(r.error) : null), head: (r?.data?.text ?? '').replace(/\\n/g, ' ⏎ ').slice(0, 200) };
+      const out = { ms: Date.now() - started, via: r?.data?.via ?? null, tool: r?.data?.tool ?? null, err: r?.data?.error ?? (r?.error ? String(r.error) : null), llmError: (r?.data?.llmError ?? '').slice(0, 120) || null, head: (r?.data?.text ?? '').replace(/\\n/g, ' ⏎ ').slice(0, 200) };
       await chrome.runtime.sendMessage({ type: 'settings:set', patch: { enabled: false } });
       return { masked: read?.data ? { enabled: read.data.enabled, model: read.data.model, keyLen: (read.data.apiKey || '').length } : null, ...out };
     })()`);
@@ -376,6 +405,33 @@ async function main() {
   } else {
     console.log('--- llm fallback --- skipped (no tmp/zzu/chat-key.txt)');
   }
+
+  // 5.85) 模型挂掉时，界面上必须看得见原因（以前是静默回落，用户只看到帮助文案）
+  const llmWarn = await ui.eval(`(async () => {
+    await chrome.storage.local.set({ llm: { enabled: true, provider: 'deepseek', apiKey: 'sk-invalid-for-test', model: 'deepseek-chat' } });
+    const el = document.querySelector('.composer input, .composer textarea');
+    if (!el) return { found: false, text: 'composer 输入框没找到' };
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+    if (setter) setter.call(el, '后天下午哪个屋子能让我安静看会儿书');
+    else el.value = '后天下午哪个屋子能让我安静看会儿书';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    const form = el.closest('form');
+    if (form) form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    // 等这一轮请求回来（模型 401 大约 100ms，给 8 秒余量）
+    for (let i = 0; i < 80; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      const warn = [...document.querySelectorAll('.bubble .hint.warn')].pop();
+      if (warn?.textContent?.includes('模型没帮上忙')) {
+        return { found: true, text: warn.textContent.slice(0, 120) };
+      }
+    }
+    const any = [...document.querySelectorAll('.bubble .hint.warn')].pop();
+    const bubbles = [...document.querySelectorAll('.bubble')].map((b) => b.className + '|' + (b.innerText || '').replace(/\\s+/g, ' ').slice(0, 70));
+    return { found: false, text: any?.textContent?.slice(0, 120) ?? null, bubbles: bubbles.slice(-3) };
+  })()`);
+  console.log('llm warn:', JSON.stringify(llmWarn));
+  await ui.eval(`chrome.storage.local.set({ llm: { enabled: false, provider: 'school', apiKey: ${JSON.stringify(llmKey ?? '')}, model: 'DeepSeek-R1' } }).then(() => 1)`);
 
   // 5.9) 填过 key 之后，同步码里应该带上 llm
   const bundleWithLlm = await ui.eval(`(async () => {

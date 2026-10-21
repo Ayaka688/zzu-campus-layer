@@ -40,11 +40,34 @@ export function renderCourseTable(courses: Course[], opts: { term: Term; week?: 
 
 export function renderFreeRooms(
   list: FreeRoom[],
-  opts: { date: string; term?: Term; sectionLabel?: string; maxRooms?: number },
+  opts: {
+    date: string;
+    term?: Term;
+    sectionLabel?: string;
+    maxRooms?: number;
+    /** 限定了地点时回显，例如「南核心教学区（南1/南2/南3）」。 */
+    place?: string;
+    /** 限定地点前全校的空教室数，用来解释「为什么只剩这几间」。 */
+    placeTotal?: number;
+  },
 ): string {
-  if (list.length === 0) return `${opts.date} 没找到符合条件的空教室。`;
+  const where = opts.place ? ` · ${opts.place}` : '';
+  if (list.length === 0) {
+    if (opts.place) {
+      return [
+        `${opts.date} 在「${opts.place}」里没找到空教室。`,
+        '',
+        `可能是当天排满了，也可能是我把地点认窄了（那一片今天共有 ${opts.placeTotal ?? 0} 间空教室，但不属于这个范围）。`,
+        '换个说法可以放宽：`明天主校区的空教室` / `明天北1的空教室`。',
+      ].join('\n');
+    }
+    return `${opts.date} 没找到符合条件的空教室。`;
+  }
   const limit = opts.maxRooms ?? 12;
-  const rows = [`**${opts.date} 空教室${opts.sectionLabel ? `（${opts.sectionLabel}）` : ''}**`, ''];
+  const rows = [
+    `**${opts.date} 空教室${where}${opts.sectionLabel ? `（${opts.sectionLabel}）` : ''}**`,
+    '',
+  ];
   for (const item of list.slice(0, limit)) {
     const seats = item.room.seats ? `${item.room.seats}座` : '';
     const floor = item.room.floor ? `${item.room.floor}层` : '';
@@ -55,7 +78,7 @@ export function renderFreeRooms(
   }
   if (list.length > limit) {
     rows.push('', `…共 ${list.length} 间符合条件的，先列前 ${limit} 间。`);
-    rows.push('换个说法能筛：加「北1」「南2」限定楼，或「只看自习室」。');
+    rows.push('换个说法能筛：加「南核」「北1」「物理馆」限定楼，或「只看自习室」。');
   }
   return rows.join('\n');
 }

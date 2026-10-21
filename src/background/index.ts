@@ -13,7 +13,7 @@ import {
   type LlmSettingsStored,
   type TokenSource,
 } from '../core/storage';
-import { mintApiKey } from '../core/llm';
+import { mintApiKey, probeLlm, resolveProvider } from '../core/llm';
 import { TOOLS, runTool } from '../core/tools';
 
 type Incoming =
@@ -24,6 +24,7 @@ type Incoming =
   | { type: 'tool'; tool: keyof typeof TOOLS; args?: unknown }
   | { type: 'settings:get' }
   | { type: 'settings:set'; patch: Partial<LlmSettingsStored> }
+  | { type: 'llm:test'; patch?: Partial<LlmSettingsStored> }
   | { type: 'chat:sync' }
   | { type: 'bundle:export' }
   | { type: 'ping' };
@@ -85,12 +86,34 @@ async function handle(message: Incoming): Promise<Reply> {
         };
       }
       const llm = await getLlmSettings();
-      return { ok: true, data: await ask(message.text, session, { llm }) };
+      let result = await ask(message.text, session, { llm });
+
+      // 学校那边的 sk- key 会失效（会话过期/被重置）。手上有 WebUI 会话就自动换一次再重试，
+      // 免得用户看到「API Key 无效」还得自己去设置里点同步。
+      if (result.llmError && resolveProvider(llm.provider).id === 'school') {
+        const chat = await getChatSession();
+        if (chat?.token) {
+          try {
+            const key = await mintApiKey(chat.token);
+            const next = await setLlmSettings({ apiKey: key, enabled: true });
+            result = await ask(message.text, session, { llm: next });
+            result = { ...result, ...(result.llmError ? {} : { llmRefreshed: true }) };
+          } catch {
+            /* 换不到就保留原来的错误 */
+          }
+        }
+      }
+      return { ok: true, data: result };
     }
     case 'settings:get':
       return { ok: true, data: await getLlmSettings() };
     case 'settings:set':
       return { ok: true, data: await setLlmSettings(message.patch ?? {}) };
+    case 'llm:test': {
+      // 先落盘（用户可能刚改完还没失焦），再用最新的配置试一次
+      const cfg = message.patch ? await setLlmSettings(message.patch) : await getLlmSettings();
+      return { ok: true, data: await probeLlm(cfg) };
+    }
     case 'bundle:export':
       try {
         return { ok: true, data: await exportTokenBundle() };

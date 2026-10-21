@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CampusService } from './services';
 import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
+import { resolvePlace, roomInPlace } from './place';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderNotices, renderPlanProgress, renderTodos } from './render';
 import { addDays, todayShanghai, weekdayOf } from './util';
 
@@ -57,12 +58,16 @@ export const findFreeRoom: ToolDefinition<{
   sections?: number[];
   roomTypeIds?: string[];
   limit?: number;
+  /** 地点词：南核 / 北核 / 北1 / 物理馆…（按教室名前缀过滤） */
+  building?: string;
 }> = {
   name: 'find_free_room',
-  description: '查空教室：全部教室减去当天占用，可按校区、座位数、指定节次筛选。',
+  description: '查空教室：全部教室减去当天占用，可按校区、楼/教学区、座位数、指定节次筛选。',
   schema: z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     campus: z.string().optional(),
+    // 地点词：南核（南1/南2/南3）、北核（北1–北5）、北1、物理馆…
+    building: z.string().min(1).optional(),
     minSeats: z.number().int().min(0).optional(),
     sections: z.array(z.number().int().min(1).max(20)).optional(),
     // 默认只查普通教室 + 多媒体教室（学号能进的真实上课教室）；
@@ -88,10 +93,20 @@ export const findFreeRoom: ToolDefinition<{
       // 不截断：让渲染层拿到真实总数（它会自己只列前 12 间并说明「共 N 间」）
       limit: args.limit,
     });
+    // 地点词（南核/北1/物理馆）按教室名前缀过滤。
+    // 不做服务端 buildingIds：那套 id 不透明、跨学期会变，名字前缀才是学生嘴里的那个东西。
+    const place = args.building ? resolvePlace(args.building) : null;
+    const scoped = place ? rooms.filter((r) => roomInPlace(r.room.name, place)) : rooms;
     const label = args.sections?.length ? `第 ${args.sections.join('/')} 节` : '';
     return {
-      text: renderFreeRooms(rooms, { date, sectionLabel: label, maxRooms: args.limit ?? 12 }),
-      data: { date, count: rooms.length, rooms },
+      text: renderFreeRooms(scoped, {
+        date,
+        sectionLabel: label,
+        maxRooms: args.limit ?? 12,
+        ...(place ? { place: place.label } : {}),
+        ...(place ? { placeTotal: rooms.length } : {}),
+      }),
+      data: { date, count: scoped.length, rooms: scoped, ...(place ? { place: place.label } : {}) },
     };
   },
 };

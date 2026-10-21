@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
 import { decodeBundle } from '../src/core/kv';
+import { probeLlm } from '../src/core/llm';
 import {
   clearTokens,
   exportTokenBundle,
@@ -23,7 +24,9 @@ interface Message {
   tool?: string;
   data?: Record<string, unknown>;
   error?: boolean;
-  via?: 'rule' | 'llm' | 'none';
+  via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+  /** 模型没帮上忙的原因 */
+  llmError?: string;
 }
 
 const QUICK: Array<{ label: string; text: string }> = [
@@ -43,6 +46,8 @@ function App() {
   const [sheet, setSheet] = useState<'none' | 'login'>('none');
   const [paste, setPaste] = useState('');
   const [note, setNote] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testNote, setTestNote] = useState('');
   const [llm, setLlm] = useState<LlmSettingsStored>({
     enabled: false,
     provider: 'school',
@@ -102,6 +107,7 @@ function App() {
           ...(res.tool ? { tool: res.tool } : {}),
           ...(res.data ? { data: res.data } : {}),
           ...(res.via ? { via: res.via } : {}),
+          ...(res.llmError ? { llmError: res.llmError } : {}),
           ...(res.error ? { error: true } : {}),
         },
       ]);
@@ -125,6 +131,16 @@ function App() {
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  /** 手机端直接打一次模型接口，把真实原因显示出来。 */
+  async function testLlm(): Promise<void> {
+    setTesting(true);
+    setTestNote('测试中…');
+    const cfg = { ...(await getLlmSettings()), enabled: true };
+    const r = await probeLlm(cfg);
+    setTesting(false);
+    setTestNote(r.ok ? `连通 ✓ ${r.ms}ms（${r.model} 回：${r.text || ''}）` : `失败 ✗ ${r.error ?? '未知原因'}`);
   }
 
   /** 手机端没有 content script，导出码主要是方便测试时把手机上的搬到别处。 */
@@ -193,6 +209,12 @@ function App() {
               void patchLlm(patch);
             }}
           />
+          <div class="row">
+            <button class="mini" onClick={() => void testLlm()} disabled={testing}>
+              {testing ? '测试中…' : '测试连接'}
+            </button>
+          </div>
+          {testNote ? <p class={testNote.startsWith('连通') ? 'hint ok' : 'hint warn'}>{testNote}</p> : null}
         </section>
       )}
 
@@ -220,6 +242,8 @@ function App() {
                 </a>
               )}
               {m.role === 'assistant' && !m.error && m.via === 'llm' && <em class="via">由模型判定</em>}
+              {m.role === 'assistant' && !m.error && m.via === 'llm-chat' && <em class="via">由模型回答</em>}
+              {m.role === 'assistant' && !m.error && m.llmError && <p class="hint warn">模型没帮上忙：{m.llmError}</p>}
               {typeof m.data?.ics === 'string' && (
                 <button class="ghost" onClick={() => download(String(m.data?.filename ?? 'zzu.ics'), String(m.data?.ics))}>
                   下载 {String(m.data?.filename ?? 'zzu.ics')}

@@ -1,6 +1,6 @@
 import { CampusService, CampusSession } from './services';
 import { helpText, parseIntent, relativeDayOffset } from './intent';
-import { classifyIntent, type LlmSettings } from './llm';
+import { classifyIntentVerbose, type LlmSettings } from './llm';
 import { ToolName, runTool } from './tools';
 import { addDays, weekdayOf } from './util';
 
@@ -9,8 +9,14 @@ export interface AskResult {
   tool?: ToolName;
   data?: Record<string, unknown>;
   error?: string;
-  /** 意图来自哪里：规则 / 学校模型 / 都没命中 */
-  via?: 'rule' | 'llm' | 'none';
+  /** 意图来自哪里：规则 / 学校模型判出工具 / 模型直接回答 / 都没命中 */
+  via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+  /** 模型没帮上忙时的原因（界面要显示，否则用户分不清「模型挂了」和「没听懂」） */
+  llmError?: string;
+  /** 这次调用模型花了多久 */
+  llmMs?: number;
+  /** 学校 key 失效后自动换了一次并重试成功（由 background 填） */
+  llmRefreshed?: boolean;
 }
 
 export interface AskOptions {
@@ -28,17 +34,39 @@ export async function ask(text: string, session: CampusSession, opts: AskOptions
 
   let intent = parseIntent(text, today);
   let via: AskResult['via'] = intent ? 'rule' : 'none';
+  let llmError: string | undefined;
+  let llmMs: number | undefined;
+  /** 模型没判工具、而是直接回了句话（「hello」这种） */
+  let llmReply: string | undefined;
 
   if (!intent && opts.llm?.enabled && opts.llm.apiKey) {
-    const fromLlm = await classifyIntent(text, today, opts.llm);
-    if (fromLlm) {
-      intent = fromLlm;
+    const attempt = await classifyIntentVerbose(text, today, opts.llm);
+    llmMs = attempt.ms;
+    if (attempt.intent) {
+      intent = attempt.intent;
       via = 'llm';
+    } else if (attempt.reply) {
+      llmReply = attempt.reply;
+    } else if (attempt.error) {
+      llmError = attempt.error;
     }
   }
 
   if (!intent) {
-    return { text: helpText(today), via: 'none' };
+    // 模型愿意说话就让它说（闲聊、解释、反问），说完也不必再列功能清单
+    if (llmReply) {
+      return {
+        text: llmReply,
+        via: 'llm-chat',
+        ...(llmMs ? { llmMs } : {}),
+      };
+    }
+    return {
+      text: helpText(today),
+      via: 'none',
+      ...(llmError ? { llmError } : {}),
+      ...(llmMs ? { llmMs } : {}),
+    };
   }
 
   // 模型算日期不可靠（实测把「后天」算成明天），
@@ -59,9 +87,10 @@ export async function ask(text: string, session: CampusSession, opts: AskOptions
       tool: intent.tool,
       via,
       ...(result.data ? { data: result.data } : {}),
+      ...(llmMs ? { llmMs } : {}),
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return { text: `出错了：${message}`, tool: intent.tool, via, error: message };
+    return { text: `出错了：${message}`, tool: intent.tool, via, error: message, ...(llmMs ? { llmMs } : {}) };
   }
 }

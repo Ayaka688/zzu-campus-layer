@@ -116,6 +116,8 @@ export class LlmError extends Error {
 export interface ChatOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** 限制输出长度：判意图只需要几十个 token，R1 的推理段不该无限长 */
+  maxTokens?: number;
 }
 
 /** 把服务商的 HTTP 错误翻成人话（401/402/403/404/429 各有不同含义）。 */
@@ -160,6 +162,7 @@ export async function llmChat(
         model: cfg.model.trim() || provider.model,
         messages,
         stream: false,
+        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
       }),
       credentials: 'omit',
       cache: 'no-store',
@@ -248,7 +251,7 @@ const intentSchema = z.object({
 
 const INT_ARGS = new Set(['minSeats', 'week', 'fromWeek', 'limit']);
 const ARR_ARGS = new Set(['sections']);
-const STR_ARGS = new Set(['campus', 'keyword', 'date']);
+const STR_ARGS = new Set(['campus', 'keyword', 'date', 'building']);
 
 /**
  * 模型给的 args 类型常常不对（`campus: 1`、`sections: 5`、`minSeats: "100"`）。
@@ -318,11 +321,18 @@ export function parseIntentsJson(raw: string): Intent | null {
 
 function buildSystemPrompt(today: string): string {
   return [
-    '你是校园信息层的意图解析器。把用户的一句话转成严格 JSON，不要输出任何解释或 markdown。',
+    '你是郑州大学「校园信息层」的助手，服务对象是这名学生本人。',
+    '',
+    '你有两件事要做，二选一：',
+    '1) 这句话需要查他本人的数据（课表/空教室/通知/成绩/考试/学分/一卡通/待办/学校服务入口）→',
+    '   只输出一行严格 JSON：{"tool":"工具名","args":{...}}，不要任何解释、不要 markdown。',
+    '2) 其它情况（打招呼、闲聊、问你是谁、问一般常识、问怎么用）→ 直接用中文正常回答，两三句就够，',
+    '   不要输出 JSON，也不要罗列功能清单。',
     '',
     '可用工具与参数：',
     '- get_schedule：课表。args: { week?: number(1-20), day?: "today"|"tomorrow"|1-7 }',
-    '- find_free_room：空教室/自习室。args: { date?: "YYYY-MM-DD", sections?: number[], minSeats?: number, campus?: string }',
+    '- find_free_room：空教室/自习室。args: { date?: "YYYY-MM-DD", sections?: number[], minSeats?: number,' +
+      ' campus?: string, building?: string }；building 填用户说的地点原词（南核 / 北核 / 北1 / 物理馆 / 材料馆）',
     '- search_notice：通知公告。args: { keyword?: string, limit?: number }',
     '- get_grades：成绩/绩点。args: {}',
     '- get_exams：考试安排。args: {}',
@@ -332,12 +342,31 @@ function buildSystemPrompt(today: string): string {
     '- get_todos：待办事项。args: {}',
     '- open_service：打开学校某个在线服务（座位预约、网上办事大厅、图书馆…）。args: { keyword: string }',
     '',
-    '输出格式：{"tool":"工具名","args":{...}}',
-    '没用到的参数直接省略，不要写 null。',
-    '判断不了就输出 {"tool":null}。宁可返回 null 也不要猜。',
+    '规矩：',
+    '- 需要查数据时，只用上面列出的工具名；args 里没用到的参数直接省略，不要写 null。',
+    '- 绝不编造数字、课程名、教室名、通知标题。你自己算不准日期（实测会把「后天」算成明天），',
+    '  所以带「今天/明天/后天」的话，别自己换算成具体日期，交给工具的去相对日期参数（day/date 都可以留空）。',
+    '- 实在既不用查数据、也说不出有用的话，就回一句「这个我帮不上，换个问法试试」。',
     `今天是 ${today}（周${'一二三四五六日'[weekdayOf(today) - 1] ?? '?'}）。`,
   ].join('\n');
 }
+
+/** 从模型输出里认出「自由回答」：纯文本，或 {"reply": "..."}。 */
+export function parseModelReply(raw: string): string | null {
+  const text = stripThink(raw).trim();
+  if (!text) return null;
+  if (text.startsWith('{')) {
+    try {
+      const j = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { reply?: unknown };
+      if (typeof j.reply === 'string' && j.reply.trim()) return j.reply.trim();
+    } catch {
+      /* 落到下面当纯文本 */
+    }
+    return null;
+  }
+  return text.slice(0, 1200);
+}
+
 
 /** L1：规则没命中时，用模型判一次意图。任何异常都返回 null（回落反问）。 */
 export async function classifyIntent(
@@ -346,19 +375,89 @@ export async function classifyIntent(
   cfg: LlmSettings,
   opts: ChatOptions = {},
 ): Promise<Intent | null> {
-  if (!cfg.enabled || !cfg.apiKey) return null;
+  const attempt = await classifyIntentVerbose(text, today, cfg, opts);
+  return attempt.intent;
+}
+
+export interface LlmAttempt {
+  intent: Intent | null;
+  /** 模型没判工具、而是直接回了句话（闲聊/解释/反问） */
+  reply?: string;
+  /** 为什么没判出来（给界面看的）；判出来了就没有这个字段 */
+  error?: string;
+  ms: number;
+  /** 是否真的发过请求（没配置/被混合内容提前拦下时为 false） */
+  called: boolean;
+}
+
+/**
+ * 同 classifyIntent，但把「为什么没成」也带回来。
+ * 之前这里静默吞掉所有异常，用户看到的是兜底帮助文案，
+ * 完全分不清「模型挂了」和「模型觉得没听懂」——这个函数就是修那个。
+ */
+export async function classifyIntentVerbose(
+  text: string,
+  today: string,
+  cfg: LlmSettings,
+  opts: ChatOptions = {},
+): Promise<LlmAttempt> {
+  const t0 = Date.now();
+  if (!cfg.enabled || !cfg.apiKey) {
+    return { intent: null, ms: 0, called: false, error: cfg.enabled ? '还没有填 API Key' : '模型兜底没打开' };
+  }
   const provider = resolveProvider(cfg.provider);
   // https 页面调 http 服务必被浏览器拦，别白等 30 秒
-  if (provider.baseUrl.startsWith('http:') && isHttpsPage()) return null;
-  let answer: string;
+  if (provider.baseUrl.startsWith('http:') && isHttpsPage()) {
+    return {
+      intent: null,
+      ms: 0,
+      called: false,
+      error: `${provider.label} 是 http 服务，HTTPS 页面会被浏览器按混合内容拦掉；换成 https 的服务商。`,
+    };
+  }
   try {
     // R1 带推理段，实测一次 11–25s；这里给到 30s，超时就当判不出（回落反问）。
-    answer = await llmChat(cfg, [
-      { role: 'system', content: buildSystemPrompt(today) },
-      { role: 'user', content: text },
-    ], { timeoutMs: opts.timeoutMs ?? 30_000, ...opts });
-  } catch {
-    return null;
+    const answer = await llmChat(
+      cfg,
+      [
+        { role: 'system', content: buildSystemPrompt(today) },
+        { role: 'user', content: text },
+      ],
+      { timeoutMs: opts.timeoutMs ?? 30_000, maxTokens: 800, ...opts },
+    );
+    const intent = parseIntentsJson(answer);
+    if (intent) return { intent, ms: Date.now() - t0, called: true };
+    // 没判出工具 → 看它是不是在正常说话（打招呼、解释、反问都算）
+    const reply = parseModelReply(answer);
+    if (reply) return { intent: null, reply, ms: Date.now() - t0, called: true };
+    return {
+      intent: null,
+      ms: Date.now() - t0,
+      called: true,
+      error: `模型没给出工具调用，也没给出可用的回答（回复：${answer.slice(0, 80) || '空'}）`,
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { intent: null, ms: Date.now() - t0, called: true, error: message };
   }
-  return parseIntentsJson(answer);
+}
+
+/** 「测试连接」用：发一条最短的请求，把状态、耗时、错误原文带回来。 */
+export async function probeLlm(
+  cfg: Pick<LlmSettings, 'provider' | 'apiKey' | 'model'>,
+  opts: ChatOptions = {},
+): Promise<{ ok: boolean; ms: number; model: string; text?: string; error?: string }> {
+  const provider = resolveProvider(cfg.provider);
+  const model = (cfg.model ?? '').trim() || provider.model;
+  const t0 = Date.now();
+  try {
+    const text = await llmChat(cfg, [{ role: 'user', content: 'ping，只回一个 ok' }], {
+      timeoutMs: opts.timeoutMs ?? 20_000,
+      maxTokens: 16,
+      ...opts,
+    });
+    return { ok: true, ms: Date.now() - t0, model, text: text.slice(0, 60) };
+  } catch (e) {
+    return { ok: false, ms: Date.now() - t0, model, error: e instanceof Error ? e.message : String(e) };
+  }
 }
