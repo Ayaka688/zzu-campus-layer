@@ -1,0 +1,19 @@
+{
+  "code": 0,
+  "message": null,
+  "data": {
+    "lastExpenditure": [],
+    "lastIncome": [],
+    "balance": "0",
+    "eCardType": "uni-app",
+    "cardStatus": "",
+    "openDate": "",
+    "monthBalance": "",
+    "appUrl": "https://ecard.v.zzu.edu.cn/server/auth/host/open?host=11&org=2",
+    "pcUrl": "https://cas.s.zzu.edu.cn/cas/login?service=http://10.66.5.237:8080/signal_web/into/1/1",
+    "lastCas": {
+      "time": null,
+      "address": null
+    }
+  }
+}

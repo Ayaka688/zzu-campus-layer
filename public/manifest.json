@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "郑大校园信息层",
+  "version": "0.2.0",
+  "description": "在你自己的校园账号下，把课表、通知、空教室、成绩收进一个侧边栏。",
+  "minimum_chrome_version": "114",
+  "permissions": ["storage", "alarms", "sidePanel"],
+  "host_permissions": [
+    "https://cas.s.zzu.edu.cn/*",
+    "https://uniapp.s.zzu.edu.cn/*",
+    "https://info.s.zzu.edu.cn/*",
+    "https://authx-service.s.zzu.edu.cn/*",
+    "https://message-service.s.zzu.edu.cn/*",
+    "https://transaction.s.zzu.edu.cn/*",
+    "https://formflow.s.zzu.edu.cn/*",
+    "https://jwxt.zzu.edu.cn/*",
+    "http://chat.zzu.edu.cn/*",
+    "https://api.deepseek.com/*",
+    "https://api.siliconflow.cn/*",
+    "https://dashscope.aliyuncs.com/*",
+    "https://api.moonshot.cn/*",
+    "https://openrouter.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "郑大校园信息层"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://uniapp.s.zzu.edu.cn/*"],
+      "js": ["content/portal.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://jwxt.zzu.edu.cn/*"],
+      "js": ["content/jwxt.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://chat.zzu.edu.cn/*"],
+      "js": ["content/chat.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,337 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --line: #262b36;
+  --text: #e6e8ec;
+  --muted: #98a0ae;
+  --accent: #4c8dff;
+  --ok: #2ecc71;
+  --warn: #e6a23c;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.55 -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+header {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  position: relative;
+}
+
+header h1 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tokens {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.pill.ok {
+  color: var(--ok);
+  border-color: rgba(46, 204, 113, 0.4);
+}
+
+.pill.off {
+  color: var(--warn);
+  border-color: rgba(230, 162, 60, 0.35);
+}
+
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.empty ul {
+  padding-left: 18px;
+  margin: 6px 0;
+}
+
+.hint {
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+  line-height: 1.7;
+}
+
+.hint a {
+  color: var(--accent);
+}
+
+.msg {
+  display: flex;
+}
+
+.msg.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 92%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  overflow-x: auto;
+}
+
+.msg.user .bubble {
+  background: rgba(76, 141, 255, 0.14);
+  border-color: rgba(76, 141, 255, 0.35);
+}
+
+.bubble.error {
+  border-color: rgba(230, 100, 100, 0.5);
+  color: #ffb4b4;
+}
+
+.bubble pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+/* 回答里是轻量 markdown（**粗体** / - 列表 / **周X** 小标题），自己渲染成结构，
+   不用 dangerouslySetInnerHTML，避免把接口内容当 HTML 执行。 */
+.md {
+  line-height: 1.55;
+}
+
+.md p {
+  margin: 0 0 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.md ul {
+  margin: 2px 0 6px;
+  padding-left: 16px;
+}
+
+.md li {
+  margin: 2px 0;
+  word-break: break-word;
+}
+
+.md .h {
+  display: block;
+  margin: 6px 0 2px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.md strong {
+  color: #fff;
+}
+
+.ghost {
+  margin-top: 8px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.quick {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+}
+
+.quick button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.quick button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.composer input {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  outline: none;
+}
+
+.composer input:focus {
+  border-color: var(--accent);
+}
+
+.composer button {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 14px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.composer button:disabled,
+.quick button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 课表回答里附带的校园地图：默认收成小图，点一下展开整张 */
+.map { margin: 10px 0 0; }
+.map img {
+  display: block;
+  margin: 0 auto;
+  width: auto;
+  max-width: 100%;
+  max-height: 240px;
+  background: #0f1115;
+  border-radius: 8px;
+  border: 1px solid var(--line, #2a2f3a);
+  cursor: zoom-in;
+}
+.map.open img { max-height: none; width: 100%; cursor: zoom-out; }
+.map figcaption { margin-top: 4px; font-size: 11px; color: var(--muted, #8b949e); }
+
+/* 设置入口与面板 */
+.gear {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: transparent;
+  border: 1px solid var(--line, #2a2f3a);
+  color: var(--muted, #8b949e);
+  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  cursor: pointer;
+  font: inherit;
+}
+.gear.on { color: var(--accent, #4c8dff); border-color: var(--accent, #4c8dff); }
+
+.settings {
+  border-bottom: 1px solid var(--line, #2a2f3a);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+.settings .row { display: flex; align-items: center; gap: 8px; }
+.settings .row.col { flex-direction: column; align-items: stretch; gap: 4px; }
+.settings input[type='text'],
+.settings input[type='password'],
+.settings select {
+  background: #0f1115;
+  border: 1px solid var(--line, #2a2f3a);
+  color: inherit;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+}
+/* 模型设置是共用组件，类名统一用 .llm-fields（不复用上面 .settings 的输入框选择器） */
+.settings .llm-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings .llm-fields .row { align-items: stretch; flex-direction: column; gap: 3px; }
+.settings .llm-fields .toggle { align-items: center; flex-direction: row; gap: 8px; }
+.settings .llm-fields .hint.warn { color: #f0b429; }
+.settings .hint { margin: 0; color: var(--muted, #8b949e); line-height: 1.5; }
+.settings .mini {
+  background: transparent;
+  border: 1px dashed var(--line, #2a2f3a);
+  color: var(--accent, #4c8dff);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font: inherit;
+  cursor: pointer;
+}
+.settings .mini:disabled { opacity: 0.5; cursor: default; }
+.settings .sync {
+  border-top: 1px dashed var(--line, #2a2f3a);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings .bundle {
+  background: #0f1115;
+  border: 1px solid var(--line, #2a2f3a);
+  color: var(--muted, #8b949e);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+  word-break: break-all;
+}
+.via { display: block; margin-top: 6px; font-size: 11px; color: var(--muted, #8b949e); }
+.go {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent, #4c8dff);
+  color: #fff;
+  font-size: 13px;
+  text-decoration: none;
+}
+.go:hover { filter: brightness(1.1); }

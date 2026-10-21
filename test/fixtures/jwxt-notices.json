@@ -1,0 +1,92 @@
+{
+ "alertNotices": [],
+ "noticeShowVms": [
+  {
+   "id": 121,
+   "title": "2025-2026-2重修报名通知",
+   "content": "<p>2025-2026-2重修报名通知</p>",
+   "scheduled": true,
+   "sendDateTime": "2026-03-30 15:00:00",
+   "alert": false,
+   "archived": false,
+   "forceConfirm": true,
+   "forceReply": false,
+   "readCount": 56946,
+   "replyCount": 0,
+   "read": true,
+   "noticeObject": "ASSIGN_ROLE",
+   "department": {
+    "id": 2,
+    "nameZh": "教务部",
+    "nameEn": "Academic Affairs Office",
+    "code": "001",
+    "abbrZh": "教务部",
+    "abbrEn": null,
+    "college": false,
+    "research": false,
+    "openCourse": true,
+    "experiment": false,
+    "telephone": "257",
+    "address": "教务部",
+    "indexNo": 1,
+    "recruitTypeSet": [
+     "UNDERGRADUATE"
+    ],
+    "recruitTypes": "UNDERGRADUATE"
+   },
+   "person": {
+    "id": 290003,
+    "nameZh": "刘绍伊",
+    "nameEn": null
+   },
+   "noticeAccounts": [],
+   "noticeRoles": [
+    {
+     "id": 1166,
+     "noticeAssoc": 121,
+     "identity": "STUDENT",
+     "roles": [
+      {
+       "id": 4,
+       "nameZh": "学生",
+       "nameEn": "Student",
+       "identity": "STUDENT"
+      },
+      {
+       "id": 7,
+       "nameZh": "离校学生",
+       "nameEn": "Leave Student",
+       "identity": "STUDENT"
+      }
+     ],
+     "departments": [],
+     "grades": [],
+     "majors": [],
+     "createdDateTime": null,
+     "updatedDateTime": null,
+     "createdBy": null,
+     "updatedBy": null
+    }
+   ],
+   "noticeAccountCount": 0,
+   "replied": false,
+   "replyContent": null,
+   "replyDateTime": null,
+   "fileInfoes": [
+    {
+     "id": 409879,
+     "name": "2025-2026-2重修报名通知.zip",
+     "key": "ba8fee02-ea4c-4e62-bd77-9b9da6aaaa17",
+     "openKey": "JnPsxQ88D2HC8Ly_@a@_2sMG1MzUtsVLNIumeBu48agUX7Jq5xWdIcAkQA_@e@__@e@_",
+     "mimeType": "application/x-zip-compressed",
+     "bytes": 6287438,
+     "createDateTime": "2026-03-30",
+     "updateDateTime": "2026-03-30",
+     "business": "其他",
+     "sizeOfKb": 6140,
+     "sizeOfMb": 3070
+    }
+   ]
+  }
+ ]
+}

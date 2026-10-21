@@ -1,0 +1,31 @@
+{
+ "result": 0,
+ "message": null,
+ "data": {
+  "user": {
+   "nameZh": "张三",
+   "nameEn": "Wang Zixuan"
+  },
+  "account": "202600000001",
+  "defaultIdentity": "STUDENT",
+  "identity": "STUDENT",
+  "firstLogin": true,
+  "gender": {
+   "nameZh": "男",
+   "nameEn": "male",
+   "id": 1,
+   "code": "1",
+   "enabled": true,
+   "bizTypeAssocs": [
+    2,
+    4
+   ],
+   "bizTypeIds": [
+    4,
+    2
+   ],
+   "transient": false,
+   "name": "男"
+  }
+ }
+}

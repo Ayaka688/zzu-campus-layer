@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # 不用 npm ci：lock 里带的是 Windows 上装出来的树，跨平台装一遍更稳
+      - name: install
+        run: npm install --no-audit --no-fund
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+      - name: 检查产物
+        run: |
+          test -f dist/manifest.json
+          test -f dist/background.js
+          test -f dist/pwa/index.html
+          node -e "const m=require('./dist/manifest.json'); if(m.manifest_version!==3) throw new Error('manifest_version'); if(m.host_permissions.length!==14) throw new Error('host_permissions'); console.log('manifest ok', m.host_permissions.length)"

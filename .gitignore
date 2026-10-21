@@ -1,0 +1,26 @@
+# 依赖与产物
+node_modules/
+dist/
+.npm-cache/
+
+# 浏览器 profile / 截图 / 日志（跑 e2e、pwa-shot 会生成）
+.e2e-profile/
+.pwa-profile/
+.e2e-panel.png
+.e2e-settings.png
+.e2e-card.png
+.pwa-home.png
+.pwa-login.png
+.pwa-schedule.png
+.pwa-answer.png
+*.log
+
+# 本地私货：千万别提交
+#   tmp/zzu/jwxt-token.txt  campus 的 X-Id-Token
+#   tmp/zzu/token.txt       门户 userToken
+#   tmp/zzu/chat-key.txt    模型 sk- key
+tmp/
+.env
+.env.*
+*.bak
+.audit.json

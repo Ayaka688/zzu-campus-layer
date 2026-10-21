@@ -1,0 +1,64 @@
+{
+ "result": 0,
+ "message": null,
+ "data": {
+  "data": [
+   {
+    "id": 1999,
+    "nameZh": "建材实验室(101房间、地下室)",
+    "nameEn": null,
+    "code": "011401",
+    "buildingId": 368,
+    "campusNameZh": "主校区",
+    "floor": 0,
+    "virtual": false,
+    "seatsForLesson": 0,
+    "enabled": false,
+    "experiment": false,
+    "roomOccupationInfoVms": null
+   },
+   {
+    "id": 1987,
+    "nameZh": "管理科学综合实验中心（301房间）",
+    "nameEn": null,
+    "code": "011701",
+    "buildingId": 4,
+    "campusNameZh": "主校区",
+    "floor": 0,
+    "virtual": false,
+    "seatsForLesson": 0,
+    "enabled": false,
+    "experiment": false,
+    "roomOccupationInfoVms": null
+   },
+   {
+    "id": 1926,
+    "nameZh": "建筑技术实验室B102",
+    "nameEn": "The building technology laboratory",
+    "code": "011901",
+    "buildingId": 18,
+    "campusNameZh": "主校区",
+    "floor": 0,
+    "virtual": false,
+    "seatsForLesson": 0,
+    "enabled": false,
+    "experiment": false,
+    "roomOccupationInfoVms": null
+   }
+  ],
+  "_page_": {
+   "currentPage": 1,
+   "rowsInPage": 3,
+   "rowsPerPage": 3,
+   "totalRows": 1614,
+   "totalPages": 538
+  },
+  "_sorts_": [
+   {
+    "field": "code",
+    "type": "ASC",
+    "typeString": "ASC"
+   }
+  ]
+ }
+}
