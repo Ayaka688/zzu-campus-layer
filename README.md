@@ -17,6 +17,7 @@
 | 「查一下 XX 的通知」「学校最近有比赛吗」 | 教务通知（完整正文）+ 门户通知（摘要）；**口语话题自动扩同义词**（比赛→竞赛/大赛/挑战杯…） | 教务 `/protal-notice/get-notices` + 门户 CMS |
 | 「我这学期绩点多少」「高数多少分」「考试安排」 | 成绩 / 考试列表；**可按课程名过滤**，并带出服务端给的构成分（平时/期中/期末/卷面，字段因课而异） | 教务 `/grade/student/grades`、`/exam/student/exam` |
 | 「图书馆还有位置吗」「明天图书馆有空位吗」 | 各馆**实时空闲/总数**（免登录），给百分比 + 选座入口；座位图与下单要本人用学号+密码登录 | 图书馆空间预约 `/v4/space/pcTopFor`（`order.lib.zzu.edu.cn`，仅校内网） |
+| 「一楼大厅哪些座位空着」「帮我订 001」 | 座位级空闲号（需先打开并登录图书馆预约页）；下单只在**长按确认**后、在你自己那个标签页里点，扩展不碰密码 | 页面内 content script + `/v4/Space/seat` |
 | 「我还差多少学分毕业」「培养方案完成情况」 | 按模块列要求/已通过/在修/还差，并用进度条画出缺口 | 教务 `/plan/search/completion/info?code=01` |
 | 「打开座位预约」「报修在哪」「食堂怎么订餐」 | 从 19 项门户服务里认出你要的，直接给官方入口（面板里是可点按钮） | 本地服务目录 `src/core/catalog.ts`（来自门户 `/v2/service/serviceShowAll`） |
 | 「我卡里还有多少钱」「最近消费」 | 一卡通余额 + 最近消费/充值流水 | 门户 `/v2/personalData/getMyECard` |
@@ -61,7 +62,8 @@ Agent 模式下模型看到的是工具返回的**真实 JSON**，提示词里�
 2. 右上角头像 → 设置 → 账号 → 「API 密钥」→ 显示 → 「+ 创建新安全密钥」，复制 `sk-…`。
 3. 侧边栏点 `⚙` → 勾选开关 → 服务商选「学校 DeepSeek」→ 粘贴 key（失焦即存）。
 
-**第 2、3 步可以省掉**：扩展里有 `content/chat.js`，只要你在同一个浏览器登录过 `chat.zzu.edu.cn`，它会把页面里的会话交给扩展，扩展拿会话去换一个 `sk-` key 自动填好（侧边栏「从已登录的 DeepSeek 页面自动获取」也是这个动作）。正常流程是：登录一次 WebUI → 打开侧边栏 → 勾一下开关。
+**第 2、3 步可以省掉**：扩展里有 `content/  （portal / jwxt / chat / library 四个页面脚本）
+  chat.js`，只要你在同一个浏览器登录过 `chat.zzu.edu.cn`，它会把页面里的会话交给扩展，扩展拿会话去换一个 `sk-` key 自动填好（侧边栏「从已登录的 DeepSeek 页面自动获取」也是这个动作）。正常流程是：登录一次 WebUI → 打开侧边栏 → 勾一下开关。
 
 ### 用自己的 key
 
@@ -204,12 +206,15 @@ src/core/        与运行环境无关的纯逻辑（可 node 下单测，扩展
   render.ts      模板回答（无模型兜底）
   intent.ts      L0 规则意图解析
   catalog.ts     门户服务目录（19 项）+ 关键词匹配，供「一句话直达」用
+  library.ts     图书馆空间预约：免登录余量 + 座位图宽容解析（只有 http）
+  libtab.ts      与图书馆页面里的 content script 通信（找标签页/发消息/翻译错误）
   place.ts       地点口语词 → 教室名前缀（南核→南1–南3、物理馆→物…）
   llm.ts         L1 兜底：6 家服务商预设（学校 Open WebUI / DeepSeek / 硅基流动 / 百炼 / Moonshot / OpenRouter）+ 意图判定 + 参数收敛 + 连通性探测 + llmChatWithTools（function calling）
-  tools.ts       10 个工具定义（schema + run）
+  tools.ts       13 个工具定义（schema + run）
   storage.ts     token / LLM 设置 / 状态（经 kv.ts，两种运行环境通用）
   toolspec.ts    给模型看的工具规格（OpenAI tools JSON Schema，手写，描述即提示词）
 agent.ts       ask(text) → 规则优先；能调工具时进 runAgent 循环（最多 4 步，带 history），否则走老的判意图路径
+src/ui/hold.tsx  长按确认按钮（不可逆动作：长按 1.2 秒才提交，松手取消）
 src/ui/rich.tsx  面板与 PWA 共用的渲染件（轻量 markdown、校园地图、下载）
 src/ui/llm-fields.tsx  面板与 PWA 共用的模型设置控件（服务商 / key / 模型名）
 src/background/  service worker：消息路由、sidePanel、alarms
@@ -296,7 +301,8 @@ npm run pwa:shot         # 真浏览器：无头 Edge + 移动视口跑 PWA（�
 - **规则层仍然先跑**：像「明天南核空教室」「今天下午有课吗」「学校最近有比赛吗」这类高频说法，规则层直接命中（几十毫秒），根本不会花模型的钱。
 - **成绩明细（平时分/卷面分）只能「有什么给什么」**：教务的 `/grade/student/grades` 是本号唯一能拿到的成绩接口，返回里带哪些构成分字段由学校决定，不同课还不一样——扩展会按语义（`平时/期中/期末/卷面/usual/midterm/final`…）把它们捞出来展示，但**不能保证每门课都有**。更细的试卷级明细（每道题得分）不在任何接口里。
 - **一卡通的「消费分类统计」做不到**：门户 `getMyECard` 只给余额和最近流水，`getECardDataList` 返回的是一堆深链配置（里面还夹着 `ecard-app.jci.edu.cn` 这种外校残留），**真正的账单明细在 `ecard.v.zzu.edu.cn`，要单独登录**。
-- **图书馆座位只能到「各馆空闲/总数」**：`/v4/Space/map`（座位图，能看到哪排哪号空着）和 `/v4/space/confirm`（下单）都要**学号 + 统一身份认证密码**登录（见 `/v4/index/bookingRules` 原文），扩展不碰密码，所以选座/预约本人做。另外该服务只有 **http**、且仅校内网可达。
+- **图书馆座位：读得到座位级，下单靠「在你的页面里点」**。座位列表来自 `/v4/Space/seat`，要那个标签页已登录；下单接口 `/v4/space/confirm` 的请求体由页面自己 AES 加密，扩展**不复制密钥**，而是长按确认后由 content script 在页面上点座位 → 点「立即预约」 → 点确认，最后按有没有出现成功提示如实回报。前提：那个标签页开着；该服务只有 http、仅校内网。
+- **数字编码的座位状态不敢猜**：只给 `state: 1/0` 时不替你判定空/占（猜错会把占着的当空的），会明说去看页面上的绿色座位。
 - **权限**：只申请 15 个域（8 个学校域 + `http://chat.zzu.edu.cn/*` + `http://order.lib.zzu.edu.cn/*` + 5 家模型服务商），不申请 `<all_urls>`；没有自定义 `baseUrl`，所以不需要 `optional_host_permissions` 去弹授权。
 - **一卡通 / 待办**：接口通，本号余额 `¥0`、待办全 0（确实没消费、没待办）；`message-service` 的未读数接口回 500，未读消息暂不做。
 - **token 存储**：只在 `chrome.storage.local`，不出本机。`X-Id-Token` 等同于登录态，别导出这个扩展的存储。

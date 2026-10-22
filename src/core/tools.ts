@@ -3,7 +3,8 @@ import { CampusService } from './services';
 import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
-import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderNotices, renderPlanProgress, renderTodos } from './render';
+import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderNotices, renderPlanProgress, renderSeatMap, renderTodos } from './render';
+import { readLibrarySeats } from './libtab';
 import { addDays, todayShanghai, weekdayOf } from './util';
 
 export interface ToolResult {
@@ -384,6 +385,62 @@ export const librarySeatTool: ToolDefinition<{ date?: string }> = {
   },
 };
 
+export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string }> = {
+  name: 'library_seat_map',
+  description:
+    '读图书馆某个区域某天的**座位级**数据（哪个座位号空着）。需要用户已经在浏览器里登录 order.lib.zzu.edu.cn。用户问“一楼大厅还有哪些座位”“靠窗还有位置吗”“订 001”时先调这个确认。',
+  schema: z.object({
+    areaId: z.string().min(1),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }),
+  async run(args) {
+    const res = await readLibrarySeats(args);
+    if (!res.ok || !res.data) {
+      return { text: res.error ?? '读不到座位图。', data: { error: true } };
+    }
+    return {
+      text: renderSeatMap(res.data),
+      data: {
+        areaId: args.areaId,
+        date: args.date,
+        free: res.data.seats.filter((s) => s.free).length,
+        total: res.data.seats.length,
+        seats: res.data.seats.slice(0, 200),
+        name: '图书馆座位图',
+      },
+    };
+  },
+};
+
+/**
+ * 下单工具：**只产出「待确认」的动作用户看**，绝不自己下单。
+ * 真正的执行由面板上的长按按钮触发（`lib:book` → content script 操作页面）。
+ */
+export const bookLibrarySeatTool: ToolDefinition<{ areaId: string; date: string; seatNo: string }> = {
+  name: 'book_library_seat',
+  description:
+    '准备一条图书馆座位预约（**不会真的下单**）。用户说“帮我订 001”“订一楼大厅 A12，明天”时调用；返回后界面上会出现需要**长按**的确认按钮，用户长按才会真的提交。',
+  schema: z.object({
+    areaId: z.string().min(1),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    seatNo: z.string().min(1),
+  }),
+  async run(args) {
+    return {
+      text: `要预约 **${args.date}** 的座位 **${args.seatNo}**（区域 ${args.areaId}）。\n下面那个按钮要**长按**才会提交，误触不会下单。`,
+      data: {
+        action: {
+          kind: 'library-book',
+          areaId: args.areaId,
+          date: args.date,
+          seatNo: args.seatNo,
+          label: `长按预约 ${args.seatNo}`,
+        },
+      },
+    };
+  },
+};
+
 export const TOOLS = {
   get_schedule: getSchedule,
   find_free_room: findFreeRoom,
@@ -394,6 +451,8 @@ export const TOOLS = {
   get_card: getCard,
   get_todos: getTodos,
   library_seats: librarySeatTool,
+  library_seat_map: librarySeatMapTool,
+  book_library_seat: bookLibrarySeatTool,
   open_service: openService,
   export_ics: exportIcs,
 } as const;

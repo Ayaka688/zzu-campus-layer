@@ -1,6 +1,9 @@
 import { Card, CardTx, Course, FreeRoom, Grade, Notice, Occupancy, Term, TodoSummary } from './types';
 import type { PlanProgress } from './jwxt';
 import type { LibrarySeats } from './library';
+import { renderSeatMap } from './library';
+
+export { renderSeatMap };
 import { compressWeeks } from './util';
 
 const WEEKDAY_CN = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];

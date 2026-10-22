@@ -113,3 +113,121 @@ export async function librarySeats(opts: { date?: string } = {}): Promise<Librar
     url: librarySeatUrl(premises[0]?.id ?? '1', picked),
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* 座位级（需要页面里的登录态，由 content/library.js 代取）            */
+/* ------------------------------------------------------------------ */
+
+export interface LibSeat {
+  /** 座位号，页面上的可读编号，如 `001`、`A12` */
+  no: string;
+  /** 原始状态字符串，服务端给什么就是什么 */
+  status: string;
+  free: boolean;
+}
+
+export interface LibSeatMap {
+  areaName?: string;
+  total?: number;
+  free?: number;
+  seats: LibSeat[];
+}
+
+/**
+ * 状态词：只认**明确的文字**。
+ * 数字编码（`1`/`0`）不敢猜——站点用 1 表示"可用"还是"已占"没有文档，
+ * 猜错会把已占的座位当成空的，所以一律当成"状态未知"。
+ */
+const FREE_RE = /^(free|empty|available|idle)$|空闲|可用|可选/i;
+const USED_RE = /used|occupied|busy|booked|使用|占用|已约|不可选/i;
+const NUMERIC_STATUS_RE = /^-?\d+$/;
+
+const seatNo = (o: Record<string, unknown>): string => {
+  for (const k of ['no', 'seat_no', 'seatNo', 'num', 'number', 'code', 'name', 'title']) {
+    const v = o[k];
+    if (typeof v === 'string' || typeof v === 'number') {
+      const s = String(v).trim();
+      if (s && s.length <= 12) return s;
+    }
+  }
+  return '';
+};
+
+const seatStatus = (o: Record<string, unknown>): string => {
+  for (const k of ['status', 'state', 'seat_status', 'seatStatus', 'use_status', 'type']) {
+    const v = o[k];
+    if (typeof v === 'string' || typeof v === 'number') return String(v);
+  }
+  return '';
+};
+
+/**
+ * 宽容解析：不假设字段名。
+ * 服务端的座位列表字段名改过（`seat_list`/`list`/`seats`/数组本身），
+ * 所以这里递归找「看起来像座位」的对象数组，认不出来就返回空。
+ */
+export function parseSeatMap(raw: unknown): LibSeatMap {
+  const out: LibSeatMap = { seats: [] };
+  const seen = new Set<string>();
+
+  const visit = (node: unknown, depth: number): void => {
+    if (!node || depth > 4) return;
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item, depth + 1);
+      return;
+    }
+    if (typeof node !== 'object') return;
+    const obj = node as Record<string, unknown>;
+
+    if (typeof obj.name === 'string' && !out.areaName) out.areaName = obj.name;
+    const t = Number(obj.total_num ?? obj.total);
+    if (Number.isFinite(t) && t > 0 && out.total === undefined) out.total = t;
+    const f = Number(obj.free_num ?? obj.free);
+    if (Number.isFinite(f) && f >= 0 && out.free === undefined) out.free = f;
+
+    const no = seatNo(obj);
+    const status = seatStatus(obj);
+    // 座位对象的最低特征：有座位号，且有状态/坐标之一
+    const looksLikeSeat =
+      Boolean(no) &&
+      (status !== '' || 'x' in obj || 'y' in obj || 'left' in obj || 'top' in obj);
+    if (looksLikeSeat && !seen.has(no)) {
+      seen.add(no);
+      const free = status !== '' && FREE_RE.test(status) && !USED_RE.test(status);
+      out.seats.push({ no, status, free });
+      return;
+    }
+
+    for (const v of Object.values(obj)) if (v && typeof v === 'object') visit(v, depth + 1);
+  };
+
+  visit(raw, 0);
+  out.seats.sort((a, b) => a.no.localeCompare(b.no, 'zh'));
+  if (out.free === undefined && out.seats.length) out.free = out.seats.filter((s) => s.free).length;
+  return out;
+}
+
+export function renderSeatMap(m: LibSeatMap, opts: { limit?: number } = {}): string {
+  const limit = opts.limit ?? 40;
+  const rows: string[] = [];
+  const area = m.areaName ? ` · ${m.areaName}` : '';
+  const freeSeats = m.seats.filter((s) => s.free);
+  rows.push(`**图书馆座位图${area}**`, '');
+  if (!m.seats.length) {
+    rows.push('没解析出座位（可能接口字段变了，或者座位图还没加载完）。');
+    return rows.join('\n');
+  }
+  rows.push(`共 ${m.seats.length} 个座位，当前空闲 **${freeSeats.length}** 个。`);
+  if (freeSeats.length) {
+    const show = freeSeats.slice(0, limit).map((s) => s.no);
+    rows.push(`空闲座位：${show.join('、')}${freeSeats.length > limit ? ` …还有 ${freeSeats.length - limit} 个` : ''}`);
+  } else if (m.seats.every((s) => s.status === '' || NUMERIC_STATUS_RE.test(s.status))) {
+    // 服务端只给数字编码时，别硬猜空闲/占用
+    rows.push(
+      '这个接口的状态是数字编码，我不敢猜哪个是"空"，所以没有替你标空闲。' +
+        '请在页面上看绿色座位（点开「图书馆座位预约」那个链接就是了）。',
+    );
+  }
+  rows.push('', '要订就说座位号（例如「订 001，今天」），确认时会让你长按按钮。');
+  return rows.join('\n');
+}

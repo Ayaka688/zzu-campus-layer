@@ -187,12 +187,50 @@ export const TOOL_SPECS: ToolSpec[] = [
       name: 'library_seats',
       description:
         '查图书馆**实时空座数**（各馆空闲/总数，免登录）。用户问「图书馆还有位置吗」「自习去哪坐」「几楼有空位」时用。' +
-        '只能给余量和入口：具体座位图与下单要学号+密码登录，你不能代替预约，也不要编造座位号。',
+        '只给馆级余量；要看**具体哪个座位空着**用 library_seat_map，要下单用 book_library_seat。',
       parameters: {
         type: 'object',
         properties: {
           date: { type: 'string', description: '日期 YYYY-MM-DD；不填=今天。用户说今天/明天时**不要填**，让服务端按相对日期算。' },
         },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'library_seat_map',
+      description:
+        '读某区域某天的**座位级**空闲情况（列出空着的座位号）。需要用户在浏览器里已登录 order.lib.zzu.edu.cn；若没登录/没打开那个页面，工具会告诉你先打开。' +
+        '用户问「一楼大厅哪些座位空着」「A12 有人吗」时用。**不要编造座位号**，只说工具返回的。',
+      parameters: {
+        type: 'object',
+        properties: {
+          areaId: { type: 'string', description: '区域 id（来自 library_seats 返回的 premises[].id 或 floors[].id，例如 "3"）' },
+          date: { type: 'string', description: '日期 YYYY-MM-DD' },
+        },
+        required: ['areaId', 'date'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'book_library_seat',
+      description:
+        '**准备**一条图书馆座位预约（不会自己下单）。用户明确说「帮我订 001」「订一楼大厅 A12，明天」时调用。' +
+        '调用后界面上会出现需要**长按**的确认按钮，用户长按才真正提交——所以你可以直接调，但要告诉用户「长按下面那个按钮才会提交」。' +
+        '座位号必须来自 library_seat_map 的结果。',
+      parameters: {
+        type: 'object',
+        properties: {
+          areaId: { type: 'string', description: '区域 id，例如 "3"' },
+          date: { type: 'string', description: '日期 YYYY-MM-DD' },
+          seatNo: { type: 'string', description: '座位号，例如 "001"（必须来自座位图结果）' },
+        },
+        required: ['areaId', 'date', 'seatNo'],
         additionalProperties: false,
       },
     },

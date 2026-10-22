@@ -1,6 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { LlmFields } from '../src/ui/llm-fields';
+import { HoldButton } from '../src/ui/hold';
 import { CampusMap, RichText, download } from '../src/ui/rich';
 import './style.css';
 
@@ -298,6 +299,27 @@ function App() {
             <div class={m.error ? 'bubble error' : 'bubble'}>
               {m.role === 'assistant' && !m.error ? <RichText text={m.text} /> : <pre>{m.text}</pre>}
               {m.role === 'assistant' && !m.error && m.tool === 'get_schedule' && <CampusMap />}
+              {m.role === 'assistant' && !m.error && typeof m.data?.action === 'object' && m.data.action && (
+                <HoldButton
+                  label={String((m.data.action as { label?: string }).label ?? '长按确认')}
+                  hint={`确认后会在你打开的图书馆页面上真的提交（座位 ${String(
+                    (m.data.action as { seatNo?: string }).seatNo ?? '',
+                  )}）`}
+                  onConfirm={async () => {
+                    const action = m.data!.action as { areaId: string; date: string; seatNo: string };
+                    const res = await send<{ text: string; data?: Record<string, unknown> }>({
+                      type: 'lib:book',
+                      args: { areaId: action.areaId, date: action.date, seatNo: action.seatNo },
+                    });
+                    setMessages((prev) => [
+                      ...prev,
+                      res.ok && res.data
+                        ? { role: 'assistant', text: res.data.text, ...(res.data.data ? { data: res.data.data } : {}) }
+                        : { role: 'assistant', text: res.error ?? '下单失败', error: true },
+                    ]);
+                  }}
+                />
+              )}
               {m.role === 'assistant' && !m.error && typeof m.data?.url === 'string' && (
                 <a class="go" href={m.data.url} target="_blank" rel="noreferrer">
                   打开 {typeof m.data.name === 'string' ? m.data.name : '链接'} ↗

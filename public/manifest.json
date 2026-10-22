@@ -47,6 +47,11 @@
       "matches": ["http://chat.zzu.edu.cn/*"],
       "js": ["content/chat.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://order.lib.zzu.edu.cn/*"],
+      "js": ["content/library.js"],
+      "run_at": "document_idle"
     }
   ]
 }

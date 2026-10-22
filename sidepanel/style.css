@@ -337,3 +337,31 @@ main {
   text-decoration: none;
 }
 .go:hover { filter: brightness(1.1); }
+
+/* 长按确认（不可逆动作） */
+.hold { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.hold-btn {
+  position: relative;
+  overflow: hidden;
+  padding: 10px 14px;
+  border: 1px solid #b3542f;
+  border-radius: 10px;
+  background: #2a1a14;
+  color: #ffb08a;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hold-btn .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #b3542f;
+  opacity: 0.45;
+}
+.hold-btn .txt { position: relative; }
+.hold-btn.active { border-color: #ff7a45; }
+.hold-btn[disabled] { opacity: 0.6; cursor: default; }
+.hold-hint { color: var(--muted, #8b949e); font-size: 11px; line-height: 1.5; }
