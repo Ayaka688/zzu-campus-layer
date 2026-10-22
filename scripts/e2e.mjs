@@ -318,6 +318,7 @@ async function main() {
         ['open_service', { keyword: '座位预约' }],
         ['get_card', {}],
         ['get_todos', {}],
+        ['library_seats', {}],
         ['export_ics', { fromWeek: 7, toWeek: 8 }],
       ];
       const out = [];

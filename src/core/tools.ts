@@ -3,7 +3,7 @@ import { CampusService } from './services';
 import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
-import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderNotices, renderPlanProgress, renderTodos } from './render';
+import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderNotices, renderPlanProgress, renderTodos } from './render';
 import { addDays, todayShanghai, weekdayOf } from './util';
 
 export interface ToolResult {
@@ -225,13 +225,17 @@ export const searchNotice: ToolDefinition<{ query?: string; keyword?: string; da
   },
 };
 
-export const getGrades: ToolDefinition<Record<string, never>> = {
+export const getGrades: ToolDefinition<{ course?: string }> = {
   name: 'get_grades',
-  description: '查成绩与绩点。',
-  schema: z.object({}),
-  async run(_args, svc) {
+  description:
+    '查成绩与绩点，可按课程名过滤（如“高数”“线性代数”）。返回每门课的分数、学分、绩点，以及服务端给出的构成分（平时/期中/期末/卷面等，字段因课而异）。',
+  schema: z.object({ course: z.string().min(1).optional() }),
+  async run(args, svc) {
     const grades = await svc.grades();
-    return { text: renderGrades(grades), data: { count: grades.length, grades } };
+    return {
+      text: renderGrades(grades, { ...(args.course ? { course: args.course } : {}) }),
+      data: { count: grades.length, grades, ...(args.course ? { course: args.course } : {}) },
+    };
   },
 };
 
@@ -359,6 +363,27 @@ export const getTodos: ToolDefinition<Record<string, never>> = {
   },
 };
 
+export const librarySeatTool: ToolDefinition<{ date?: string }> = {
+  name: 'library_seats',
+  description:
+    '查图书馆还有多少空座（各馆实时空闲/总数），需要“今天/明天图书馆还有位置吗”“自习去哪坐”时用。只给余量和入口，选座/预约本人做。',
+  schema: z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
+  async run(args, svc) {
+    const seats = await svc.librarySeats(args.date);
+    return {
+      text: renderLibrarySeats(seats),
+      data: {
+        date: seats.date,
+        premises: seats.premises,
+        free: seats.premises.reduce((n, p) => n + p.free, 0),
+        total: seats.premises.reduce((n, p) => n + p.total, 0),
+        url: seats.url,
+        name: '图书馆座位预约',
+      },
+    };
+  },
+};
+
 export const TOOLS = {
   get_schedule: getSchedule,
   find_free_room: findFreeRoom,
@@ -368,6 +393,7 @@ export const TOOLS = {
   get_plan_progress: getPlanProgress,
   get_card: getCard,
   get_todos: getTodos,
+  library_seats: librarySeatTool,
   open_service: openService,
   export_ics: exportIcs,
 } as const;

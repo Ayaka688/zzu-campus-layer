@@ -92,11 +92,13 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
     expect(noon.tool).toBe('get_schedule');
     expect(noon.text).toContain('下午');
 
-    // ③ 「预约明天图书馆一楼随便一个位置」：要指向座位预约入口，不能给成「图书馆 馆藏检索」
+    // ③ 「预约明天图书馆一楼随便一个位置」：要指向座位预约（新版本直接给实时余量 + 直达链接），
+    //    不能给成「图书馆 馆藏检索」。
     const seat = await ask('预约明天图书馆一楼随便一个位置', base);
-    expect(seat.tool).toBe('open_service');
-    expect(seat.text).toContain('座位预约');
+    expect(['library_seats', 'open_service']).toContain(seat.tool);
+    expect(seat.text).toContain('座位');
     expect(String(seat.data?.url ?? '')).toContain('order.lib.zzu.edu.cn');
+    expect(seat.text).not.toContain('馆藏检索');
   });
 
   it('通知有标题与摘要', async () => {    const notices = await svc.notices({ limit: 3 });
@@ -133,5 +135,16 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
     const todos = await svc.todos();
     expect(todos.counts.todo).toBeGreaterThanOrEqual(0);
     expect(Array.isArray(todos.items)).toBe(true);
+  });
+
+  it('图书馆实时空座能查到（免登录接口）', async () => {
+    const seats = await svc.librarySeats();
+    expect(seats.premises.length).toBeGreaterThan(0);
+    const main = seats.premises.find((p) => p.name.includes('主校区'));
+    expect(main).toBeTruthy();
+    expect(main!.total).toBeGreaterThan(0);
+    expect(main!.free).toBeGreaterThanOrEqual(0);
+    expect(main!.free).toBeLessThanOrEqual(main!.total);
+    expect(seats.url).toContain('order.lib.zzu.edu.cn');
   });
 });

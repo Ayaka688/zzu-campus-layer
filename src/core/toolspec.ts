@@ -131,8 +131,16 @@ export const TOOL_SPECS: ToolSpec[] = [
     type: 'function',
     function: {
       name: 'get_grades',
-      description: '查成绩与绩点（本学期）。用户问「绩点多少」「考得怎么样」「挂科没」时用。',
-      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      description:
+        '查成绩与绩点。可按课程名过滤（用户问「高数多少分」「哪门拉低了绩点」时把课名填进 course）。' +
+        '返回分数、学分、绩点，以及服务端给出的构成分（平时/期中/期末/卷面，不同课字段不同，没有就不显示）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          course: { type: 'string', description: '课程名或其中一段，例如 高数 / 线性代数 / 英语。不填=全部' },
+        },
+        additionalProperties: false,
+      },
     },
   },
   {
@@ -171,6 +179,22 @@ export const TOOL_SPECS: ToolSpec[] = [
       name: 'get_todos',
       description: '查待办事项：待办/在办/待申请计数与具体条目。',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'library_seats',
+      description:
+        '查图书馆**实时空座数**（各馆空闲/总数，免登录）。用户问「图书馆还有位置吗」「自习去哪坐」「几楼有空位」时用。' +
+        '只能给余量和入口：具体座位图与下单要学号+密码登录，你不能代替预约，也不要编造座位号。',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', description: '日期 YYYY-MM-DD；不填=今天。用户说今天/明天时**不要填**，让服务端按相对日期算。' },
+        },
+        additionalProperties: false,
+      },
     },
   },
   {

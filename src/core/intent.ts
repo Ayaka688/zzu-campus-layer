@@ -26,18 +26,7 @@ const PERIOD_SECTIONS: Record<Period, number[]> = {
 };
 
 /** 通知类问题里常见的话题词：用户常直接说话题，不说「通知」二字。 */
-const NOTICE_TOPICS = [
-  '比赛',
-  '竞赛',
-  '大赛',
-  '挑战杯',
-  '奖学金',
-  '助学金',
-  '评奖',
-  '评优',
-  '实习',
-  '招聘',
-  '重修',
+const NOTICE_TOPICS = ['比赛', '竞赛', '大赛', '挑战杯', '奖学金', '助学金', '评奖', '评优', '实习', '招聘', '重修',
   '选课',
   '四六级',
   '党课',
@@ -47,7 +36,22 @@ const NOTICE_TOPICS = [
   '保研',
 ];
 
-/** 「上午/下午/晚上」→ 时段。规则层用它把「今天下午有课吗」收窄。 */export function extractPeriod(text: string): Period | undefined {
+/**
+ * 从「高数多少分」「线性代数考了几分」里捞课程名。
+ * 只做保守抽取：命不中就返回 undefined，交给工具列全部课程。
+ */
+export function extractCourseName(text: string): string | undefined {
+  const STOP = /^(这|那|我|我的|这门|哪门|哪一?门|所有|全部|总分|平均分?|成绩|绩点|分数|期末|期中|考试|挂科)/;
+  const m = /([\u4e00-\u9fa5A-Za-z]{2,12}?)(?:这门课?|课)?(?:考了|得了|拿了)?(?:多少分|几分|多少|得几分|的分数|成绩|分数)/.exec(text);
+  const cand = m?.[1]?.trim();
+  if (!cand) return undefined;
+  if (STOP.test(cand)) return undefined;
+  if (/成绩|绩点|分数|多少|几分/.test(cand)) return undefined;
+  return cand;
+}
+
+/** 「上午/下午/晚上」→ 时段。规则层用它把「今天下午有课吗」收窄。 */
+export function extractPeriod(text: string): Period | undefined {
   if (/上午|早上|早晨|一早/.test(text)) return 'morning';
   if (/下午|半晌/.test(text)) return 'afternoon';
   if (/晚上|夜里|傍晚/.test(text)) return 'evening';
@@ -145,6 +149,17 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     };
   }
 
+  // 图书馆座位：问「还有位置吗」「空几个座」走实时余量；只说「预约座位」仍然走服务直达。
+  // 放在空教室规则前面，否则「图书馆自习」会被当成「找空教室」。
+  if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|还有位|有空|满|几楼|自习/.test(t)) {
+    const date = extractDate(t, today);
+    return {
+      tool: 'library_seats',
+      args: date ? { date } : {},
+      reason: '关键词：图书馆座位余量',
+    };
+  }
+
   if (/空教室|自习室|空闲教室|没课的教室|自习|哪里有?座/.test(t)) {
     const date = extractDate(t, today);
     const period = extractPeriod(t);
@@ -167,8 +182,14 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     };
   }
 
-  if (/成绩|绩点|分数|挂科|gpa/i.test(t)) {
-    return { tool: 'get_grades', args: {}, reason: '关键词：成绩' };
+  if (/成绩|绩点|分数|多少分|几分|挂科|gpa/i.test(t)) {
+    // 「高数多少分」「线性代数考了多少」→ 把课名捞出来传给工具按课程过滤。
+    const course = extractCourseName(t);
+    return {
+      tool: 'get_grades',
+      args: course ? { course } : {},
+      reason: course ? `关键词：成绩 + 课程「${course}」` : '关键词：成绩',
+    };
   }
 
   if (/培养方案|学分|毕业.{0,4}学分|还差.{0,4}学分|修满/.test(t)) {

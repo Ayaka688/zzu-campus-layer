@@ -1,5 +1,6 @@
 import { Card, CardTx, Course, FreeRoom, Grade, Notice, Occupancy, Term, TodoSummary } from './types';
 import type { PlanProgress } from './jwxt';
+import type { LibrarySeats } from './library';
 import { compressWeeks } from './util';
 
 const WEEKDAY_CN = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -95,13 +96,57 @@ export function renderNotices(notices: Notice[], keyword?: string): string {
   return rows.join('\n');
 }
 
-export function renderGrades(grades: Grade[]): string {
+const COMPONENT_RE = /(平时|期中|期末|卷面|机试|实验|作业|大作业|usual|midterm|final|exam|quiz|homework|component)/i;
+
+/** 从成绩对象里翻出「构成分」（平时/期中/期末/卷面…），字段名各校不同所以按语义找。 */
+function componentScores(g: Grade): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const [k, v] of Object.entries(g as Record<string, unknown>)) {
+    if (v === null || v === undefined || typeof v === 'object') continue;
+    if (!COMPONENT_RE.test(k)) continue;
+    const s = String(v).trim();
+    if (!s || s === '0') continue;
+    out.push([k, s]);
+  }
+  return out;
+}
+
+export function renderGrades(grades: Grade[], opts: { course?: string } = {}): string {
+  const wanted = opts.course?.trim();
+  const list = wanted
+    ? grades.filter((g) => {
+        const name = `${g.courseName ?? ''}${g.courseCode ?? ''}`;
+        return name.includes(wanted) || wanted.includes(g.courseName ?? '\u0000');
+      })
+    : grades;
+
   if (grades.length === 0) return '成绩列表为空（本学期可能还没出分，或该学期无成绩）。';
-  const rows = ['**成绩**', ''];
-  for (const g of grades) {
+  if (wanted && list.length === 0) {
+    const names = grades.map((g) => g.courseName ?? g.courseCode ?? '未知课程');
+    return `没找到「${wanted}」这门课的成绩。已出分的课程：${names.join('、')}。`;
+  }
+
+  const rows = [wanted ? `**成绩 · ${wanted}**` : '**成绩**', ''];
+  for (const g of list) {
     const name = g.courseName ?? g.courseCode ?? '未知课程';
     const score = g.score ?? g.gradePoint ?? '—';
-    rows.push(`- ${name}：${String(score)}${g.credit ? `（${String(g.credit)} 学分）` : ''}`);
+    const extra = componentScores(g);
+    const parts = [String(score)];
+    if (g.credit) parts.push(`${String(g.credit)} 学分`);
+    if (g.gradePoint && g.gradePoint !== score) parts.push(`绩点 ${String(g.gradePoint)}`);
+    rows.push(`- **${name}**：${parts.join(' · ')}`);
+    if (extra.length > 0) {
+      rows.push(`  - 构成：${extra.map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+    }
+  }
+  if (!wanted && list.length > 1) {
+    const gps = list
+      .map((g) => Number(g.gradePoint))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (gps.length > 0) {
+      const avg = gps.reduce((a, b) => a + b, 0) / gps.length;
+      rows.push('', `平均绩点（已出分 ${gps.length} 门）**${avg.toFixed(2)}**`);
+    }
   }
   return rows.join('\n');
 }
@@ -193,5 +238,32 @@ export function renderTodos(t: TodoSummary): string {
     }
   }
   rows.push('', '办理入口：`打开网上办事大厅`。');
+  return rows.join('\n');
+}
+
+/**
+ * 图书馆座位余量。
+ * 数据是「各馆空闲/总数」的实时快照（免登录接口），看不到具体座位号——
+ * 座位图和下单都需要学号+密码登录，所以这里只给直达链接。
+ */
+export function renderLibrarySeats(s: LibrarySeats): string {
+  const rows = [`**图书馆座位 · ${s.date}**`, ''];
+  if (s.premises.length === 0) {
+    rows.push('没拿到座位数据，可能是接口改版或当前不在校内网。');
+    return rows.join('\n');
+  }
+  const sorted = [...s.premises].sort((a, b) => b.free - a.free);
+  for (const p of sorted) {
+    const pct = p.total > 0 ? Math.round((p.free / p.total) * 100) : 0;
+    rows.push(`- **${p.name}** 空闲 **${p.free}** / ${p.total}（${pct}%）`);
+  }
+  const totalFree = sorted.reduce((n, p) => n + p.free, 0);
+  const totalAll = sorted.reduce((n, p) => n + p.total, 0);
+  if (totalAll > 0) rows.push('', `合计空闲 **${totalFree}** / ${totalAll}。`);
+  rows.push(
+    '',
+    '具体座位图（哪排哪号空着）和下单要用**学号 + 统一身份认证密码**登录，扩展不碰你的密码。',
+    '点下面的按钮进去选座；要「看完座位图再回来让我下单」目前还做不到。',
+  );
   return rows.join('\n');
 }

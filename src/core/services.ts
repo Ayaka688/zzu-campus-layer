@@ -26,6 +26,7 @@ import {
   portalTeachingWeek,
   portalTodos,
 } from './portal';
+import { librarySeats, type LibrarySeats } from './library';
 import { addDays, todayShanghai } from './util';
 
 export interface CampusSession {
@@ -242,5 +243,14 @@ export class CampusService {
       return a.room.name.localeCompare(b.room.name, 'zh-Hans-CN');
     });
     return opts.limit ? result.slice(0, opts.limit) : result;
+  }
+
+  /**
+   * 图书馆座位余量（免登录，走 `order.lib.zzu.edu.cn`）。
+   * 只给「各馆空闲/总数 + 直达链接」；具体座位图和下单要学号+密码登录，扩展不碰。
+   */
+  async librarySeats(date?: string): Promise<LibrarySeats> {
+    const key = `lib:${date ?? 'auto'}`;
+    return this.memo(key, () => librarySeats(date ? { date } : {}), 60_000);
   }
 }
