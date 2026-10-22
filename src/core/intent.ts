@@ -89,6 +89,32 @@ function extractWeek(text: string): number | undefined {
   return undefined;
 }
 
+/**
+ * 图书馆区域 id：站点里 `1`=主校区、`10`=东、`60`=南、`70`=北，
+ * 楼层是独立的 id（一楼 `2`/`71`/`61`，二楼 `72`/`4`/`24`…）。
+ * 这里只做最常见的「主校区 + 一楼/二楼」映射；其它说法交给模型或让用户补一句。
+ */
+const LIB_AREAS: Array<{ re: RegExp; id: string; name: string }> = [
+  { re: /(一楼|1楼|一层|大厅)/, id: '3', name: '一楼大厅' },
+  { re: /(二楼|2楼|二层)/, id: '4', name: '二楼' },
+  { re: /(三楼|3楼|三层)/, id: '5', name: '三楼' },
+  { re: /(四楼|4楼|四层)/, id: '6', name: '四楼' },
+];
+
+function extractLibraryArea(text: string): { id: string; name: string } | undefined {
+  for (const a of LIB_AREAS) if (a.re.test(text)) return { id: a.id, name: a.name };
+  return undefined;
+}
+
+/** 座位号：`001`、`A12`、`A-12` 这类；避免把「明天」里的数字当座位号 */
+function extractSeatNo(text: string): string | undefined {
+  const m = /(?:座位?|号)?\s*([A-Za-z]{0,2}-?\d{2,4})(?!\d)/.exec(text);
+  if (!m?.[1]) return undefined;
+  const no = m[1].replace(/-/g, '');
+  if (/^\d{4}$/.test(no) && Number(no) > 1900) return undefined; // 年份
+  return no;
+}
+
 function extractDate(text: string, today: string): string | undefined {
   const iso = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(text);
   if (iso?.[1] && iso[2] && iso[3]) {
@@ -149,10 +175,43 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     };
   }
 
+  // 「订 001，明天」这种不带"图书馆"的说法：有座位号 + 订/约 就算订座
+  // 区域没说的话默认一楼大厅（`3`），这是学生最常用的那个厅。
+  {
+    const seatNo = extractSeatNo(t);
+    if (seatNo && /订|预约|约一个|抢|占/.test(t) && !/教室|自习室/.test(t)) {
+      const date = extractDate(t, today);
+      const area = extractLibraryArea(t) ?? { id: '3', name: '一楼大厅' };
+      return {
+        tool: 'book_library_seat',
+        args: { areaId: area.id, date: date ?? addDays(today, 1), seatNo },
+        reason: `关键词：订座（${area.name} ${seatNo}）`,
+      };
+    }
+  }
+
   // 图书馆座位：问「还有位置吗」「空几个座」走实时余量；只说「预约座位」仍然走服务直达。
   // 放在空教室规则前面，否则「图书馆自习」会被当成「找空教室」。
   if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|还有位|有空|满|几楼|自习/.test(t)) {
     const date = extractDate(t, today);
+    const area = extractLibraryArea(t);
+    // 只要提到「订/约/抢」就说明想下单；带座位号直接进下单准备，否则先看座位图
+    const wantsBook = /订|预约|约一个|抢/.test(t);
+    const seatNo = extractSeatNo(t);
+    if (wantsBook && area && seatNo) {
+      return {
+        tool: 'book_library_seat',
+        args: { areaId: area.id, date: date ?? addDays(today, 1), seatNo },
+        reason: `关键词：图书馆订座（${area.name} ${seatNo}）`,
+      };
+    }
+    if (wantsBook && area) {
+      return {
+        tool: 'library_seat_map',
+        args: { areaId: area.id, date: date ?? addDays(today, 1) },
+        reason: `关键词：图书馆座位图（${area.name}）`,
+      };
+    }
     return {
       tool: 'library_seats',
       args: date ? { date } : {},

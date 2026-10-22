@@ -29,7 +29,7 @@ describe('图书馆座位', () => {
     // 总数 0 的馆不能算出 NaN%
     expect(text).not.toContain('NaN');
     // 必须说清「不能代约」
-    expect(text).toContain('学号 + 统一身份认证密码');
+    expect(text).toContain('长按');
   });
 
   it('有楼层数据时逐层列出（「一楼还有位置吗」靠这个）', () => {
