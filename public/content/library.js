@@ -53,8 +53,20 @@
     if (!token()) {
       return { ok: false, error: '这个页面还没登录。请先在浏览器里登录图书馆空间预约，再让我查座位。' };
     }
-    const map = await post('/v4/Space/map', { id: areaId, date });
-    const seat = await post('/v4/Space/seat', { id: areaId, date });
+    // payload 来自页面实测（2026-10-22）：
+    // {id, day, label_id, start_time, end_time, begdate, enddate}
+    // 用 `date` 而不是 `day` 会拿到空数组——这是之前"解析出 0 个座位"的第二个原因。
+    const body = {
+      id: areaId,
+      day: date,
+      label_id: [],
+      start_time: '07:30',
+      end_time: '22:30',
+      begdate: '',
+      enddate: '',
+    };
+    const map = await post('/v4/Space/map', body);
+    const seat = await post('/v4/Space/seat', body);
     return {
       ok: true,
       areaId,

@@ -1,4 +1,6 @@
+import { todayShanghai } from '../core/util';
 import { ask } from '../core/agent';
+import { buildDigest, dueItems, gradeFingerprint, newGradeNames } from '../core/watch';
 import { CampusService } from '../core/services';
 import {
   ensureValidToken,
@@ -12,8 +14,11 @@ import {
   tokenStatuses,
   type LlmSettingsStored,
   type TokenSource,
+  getWatchState,
+  setWatchState,
 } from '../core/storage';
 import { mintApiKey, probeLlm, resolveProvider } from '../core/llm';
+import { bookLibrarySeat, findLibraryTab } from '../core/libtab';
 import { TOOLS, runTool } from '../core/tools';
 
 type Incoming =
@@ -27,6 +32,8 @@ type Incoming =
   | { type: 'llm:test'; patch?: Partial<LlmSettingsStored> }
   | { type: 'chat:sync' }
   | { type: 'bundle:export' }
+  | { type: 'lib:book'; args: { areaId: string; date: string; seatNo: string } }
+  | { type: 'lib:status' }
   | { type: 'ping' };
 
 interface Reply<T = unknown> {
@@ -129,6 +136,24 @@ async function handle(message: Incoming): Promise<Reply> {
       const out = await runTool(message.tool, message.args ?? {}, new CampusService(session));
       return { ok: true, data: out };
     }
+    case 'lib:book': {
+      const out = await bookLibrarySeat(message.args);
+      if (!out.ok) return { ok: false, error: out.error ?? '下单失败' };
+      const d = out.data ?? {};
+      return {
+        ok: true,
+        data: {
+          text: d.verified
+            ? `座位 **${message.args.seatNo}** 预约成功（页面出现了成功提示）。`
+            : `已经点过确认，但没看到成功提示，请去标签页核对一下座位 ${message.args.seatNo}。`,
+          data: { ...d, seatNo: message.args.seatNo, date: message.args.date },
+        },
+      };
+    }
+    case 'lib:status': {
+      const tab = await findLibraryTab();
+      return { ok: true, data: { open: Boolean(tab), url: tab?.url ?? null } };
+    }
     case 'ping':
       return { ok: true, data: 'pong' };
     default:
@@ -144,7 +169,68 @@ chrome.runtime.onMessage.addListener((message: Incoming, _sender, sendResponse) 
   return true;
 });
 
+
+/** 每天一次：看有没有新出分、有没有快到期的通知，有就推系统通知 */
+async function dailyWatch(): Promise<void> {
+  const session = await loadSession();
+  if (!session.jwxtToken && !session.portalToken) return;
+
+  const today = todayShanghai();
+  const state = await getWatchState();
+  if (state.notifiedOn === today) return; // 一天一次
+
+  const svc = new CampusService(session);
+  const grades: unknown[] = [];
+  const notices: { id: string; title: string; summary?: string }[] = [];
+
+  try {
+    const g = await svc.grades();
+    grades.push(...(g as unknown[]));
+  } catch {
+    /* 没成绩权限就算了，不影响截止提醒 */
+  }
+  try {
+    const n = await svc.notices({ limit: 20 });
+    for (const item of n as unknown[]) {
+      const o = item as Record<string, unknown>;
+      const id = String(o.id ?? o.title ?? '');
+      const title = String(o.title ?? '');
+      if (!id || !title) continue;
+      notices.push({
+        id,
+        title,
+        ...(typeof o.summary === 'string' ? { summary: o.summary } : {}),
+      });
+    }
+  } catch {
+    /* 通知拿不到也算了 */
+  }
+
+  const fp = gradeFingerprint(grades);
+  const fresh = state.gradeFp !== undefined && fp ? newGradeNames(grades, state.gradeFp) : [];
+  const dues = dueItems(notices, today, 7);
+  const digest = buildDigest({ today, dues, newGrades: fresh });
+
+  if (digest && typeof chrome !== 'undefined' && chrome.notifications) {
+    chrome.notifications.create(`watch-${today}`, {
+      type: 'basic',
+      iconUrl: 'icons/icon-192.png',
+      title: digest.title,
+      message: digest.body,
+    });
+  }
+
+  await setWatchState({
+    ...(fp ? { gradeFp: fp } : {}),
+    ...(digest ? { notifiedOn: today } : {}),
+  });
+}
+
 chrome.alarms.create('heartbeat', { periodInMinutes: 30 });
+// 早 9 点后随便什么时候跑一次；periodInMinutes 保证扩展重装后也会再次拉起
+chrome.alarms.create('daily-watch', { periodInMinutes: 6 * 60 });
+void dailyWatch();
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'heartbeat') void tokenStatuses();
+  if (alarm.name === 'daily-watch') void dailyWatch();
 });

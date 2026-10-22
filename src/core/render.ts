@@ -78,7 +78,20 @@ export function renderFreeRooms(
     const meta = [item.room.campus, floor, seats].filter(Boolean).join(' ');
     const span = compressWeeks(item.freeSections);
     const all = item.freeSections.length >= 10 ? '全天' : `空闲 ${span} 节`;
-    rows.push(`- ${item.room.name}${meta ? `（${meta}）` : ''} ${all}`);
+    // 「能坐多久」比「第几节空」更接近学生的问题：优先给连续窗口
+    const duration = item.longestMin ? `最长能连坐 ${fmtDur(item.longestMin)}` : '';
+    const nowHint = item.freeNowMin ? `现在就能坐 ${fmtDur(item.freeNowMin)}` : '';
+    const winText = item.windows?.length
+      ? item.windows
+          .slice(0, 2)
+          .map((w) => `${minToHhmm(w.start)}–${minToHhmm(w.end)}`)
+          .join('、')
+      : '';
+    rows.push(
+      `- ${item.room.name}${meta ? `（${meta}）` : ''} ${all}` +
+        (winText ? `，${winText}` : '') +
+        (nowHint ? `，${nowHint}` : duration ? `，${duration}` : ''),
+    );
   }
   if (list.length > limit) {
     rows.push('', `…共 ${list.length} 间符合条件的，先列前 ${limit} 间。`);
@@ -273,4 +286,20 @@ export function renderLibrarySeats(s: LibrarySeats): string {
     '要下单就说「订 001，明天」——我会给你一个**长按 1.2 秒**的确认按钮，长按才提交，误触不会下单。',
   );
   return rows.join('\n');
+}
+
+/** 分钟 → 「2 小时 40 分」 */
+export function fmtDur(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h && m) return `${h} 小时 ${m} 分`;
+  if (h) return `${h} 小时`;
+  return `${m} 分钟`;
+}
+
+/** 分钟 → HH:mm */
+export function minToHhmm(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }

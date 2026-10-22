@@ -199,3 +199,22 @@ export async function importTokenBundle(bundle: TokenBundle): Promise<TokenStatu
   }
   return tokenStatuses(now);
 }
+
+export interface WatchState {
+  /** 上次看到的成绩指纹（新出分靠它比较） */
+  gradeFp?: string;
+  /** 上次推送的日期（一天只推一次） */
+  notifiedOn?: string;
+}
+
+const WATCH_KEY = 'watch';
+
+export async function getWatchState(): Promise<WatchState> {
+  return (await getKV().get<WatchState>(WATCH_KEY)) ?? {};
+}
+
+export async function setWatchState(patch: Partial<WatchState>): Promise<WatchState> {
+  const next = { ...(await getWatchState()), ...patch };
+  await getKV().set(WATCH_KEY, next);
+  return next;
+}

@@ -48,30 +48,104 @@ async function send<T>(tabId: number, type: string, args: unknown): Promise<LibT
 }
 
 /** 读某个区域某天的座位图（需要那个标签页已经登录） */
+/** 直接在页面里读 sessionStorage.token——绕开 content script 版本漂移 */
+async function pageToken(tabId: number): Promise<string> {
+  try {
+    const out = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => window.sessionStorage.getItem('token') ?? '',
+    });
+    const v = out?.[0]?.result;
+    return typeof v === 'string' ? v : '';
+  } catch {
+    return '';
+  }
+}
+
+/** 后台直接打图书馆接口（host_permissions 已含该域，SW 的 fetch 不受页面 CORS 限制） */
+async function fetchSeatsDirect(areaId: string, day: string, token: string): Promise<unknown> {
+  const res = await fetch('http://order.lib.zzu.edu.cn/v4/Space/seat', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+      authorization: 'bearer' + token,
+    },
+    body: JSON.stringify({
+      id: areaId,
+      day,
+      label_id: [],
+      start_time: '07:30',
+      end_time: '22:30',
+      begdate: '',
+      enddate: '',
+    }),
+  });
+  return res.json();
+}
+
 export async function readLibrarySeats(args: {
   areaId: string;
   date: string;
-}): Promise<LibTabResult<LibSeatMap & { raw?: unknown }>> {
+}): Promise<
+  LibTabResult<{
+    seats: { no: string; status: string; free: boolean }[];
+    areaId: string;
+    tried: string[];
+    raw?: unknown;
+  }>
+> {
   const tab = await findLibraryTab();
   if (!tab?.id) {
     return {
       ok: false,
       error:
-        '要先在浏览器里打开并登录图书馆空间预约（order.lib.zzu.edu.cn），我才能读到座位图——那个站的登录态不在我校内 token 里。',
+        '要先在浏览器里打开并登录图书馆空间预约（http://order.lib.zzu.edu.cn/h5/index.html#/seat/index）。那个站的登录态不在我校内 token 里，我读不到。',
     };
   }
-  const res = await send<{ map?: unknown; seat?: unknown; areaId?: string; date?: string }>(
-    tab.id,
-    'lib:probe',
-    args,
-  );
-  if (!res.ok) return { ok: false, error: res.error ?? '读取失败' };
-  const payload = res.data;
-  const seatMap = parseSeatMap(payload?.seat ?? payload?.map ?? payload);
-  return { ok: true, data: { ...seatMap, raw: payload } };
+
+  // 模型给的 areaId 经常是「一楼」的另一个编码（storeys 里 2、payload 里 3），
+  // 所以拿到空座位表就换下一个候选 id 再试——座位表非空才说明 id 对。
+  const token = await pageToken(tab.id);
+  const candidates = [args.areaId, '3', '4', '5', '6'].filter((v, i, a) => v && a.indexOf(v) === i);
+  const tried: string[] = [];
+  let empty: {
+    seats: { no: string; status: string; free: boolean }[];
+    areaId: string;
+    tried: string[];
+    raw?: unknown;
+  } = {
+    seats: [],
+    areaId: args.areaId,
+    tried,
+  };
+  for (const id of candidates) {
+    tried.push(id);
+    let payload: unknown;
+    try {
+      payload = await fetchSeatsDirect(id, args.date, token);
+    } catch {
+      payload = undefined;
+    }
+    let parsed = parseSeatMap(payload);
+    if (parsed.seats.length === 0) {
+      // 后台直连读不到时退回 content script（万一 token 在页面里但 SW 被拦）
+      const res = await send<{ ok?: boolean; seat?: unknown; error?: string }>(tab.id, 'lib:probe', {
+        areaId: id,
+        date: args.date,
+      });
+      if (res.ok) {
+        payload = res.data?.seat;
+        parsed = parseSeatMap(payload);
+      }
+    }
+    const here = { seats: parsed.seats, areaId: id, tried, raw: payload };
+    if (parsed.seats.length > 0) return { ok: true, data: here };
+    empty = here;
+  }
+  return { ok: true, data: empty };
 }
 
-/** 执行预约（只能由用户长按确认后调用） */
 export async function bookLibrarySeat(args: {
   areaId: string;
   date: string;

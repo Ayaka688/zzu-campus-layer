@@ -1,8 +1,9 @@
 import { z } from 'zod';
-import { CampusService } from './services';
+import { CampusService, byDuration } from './services';
 import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
+import { planStudy, renderStudyPlan } from './study';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderNotices, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, todayShanghai, weekdayOf } from './util';
@@ -134,7 +135,7 @@ export const findFreeRoom: ToolDefinition<{
     const scoped = place ? rooms.filter((r) => roomInPlace(r.room.name, place)) : rooms;
     const label = args.sections?.length ? `第 ${args.sections.join('/')} 节` : '';
     return {
-      text: renderFreeRooms(scoped, {
+      text: renderFreeRooms(byDuration(scoped), {
         date,
         sectionLabel: label,
         maxRooms: args.limit ?? 12,
@@ -398,6 +399,13 @@ export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string }
     if (!res.ok || !res.data) {
       return { text: res.error ?? '读不到座位图。', data: { error: true } };
     }
+    if (!res.data.seats.length) {
+      const raw = JSON.stringify(res.data.raw ?? res.data).slice(0, 900);
+      return {
+        text: `这次没解析出座位号（接口可能改了字段名）。原始返回片段：\n\`\`\`json\n${raw}\n\`\`\`\n把这段发我，我按真实字段改解析。`,
+        data: { error: true, raw: res.data.raw },
+      };
+    }
     return {
       text: renderSeatMap(res.data),
       data: {
@@ -441,9 +449,44 @@ export const bookLibrarySeatTool: ToolDefinition<{ areaId: string; date: string;
   },
 };
 
+const studySpotTool: ToolDefinition<{ date?: string; needMinutes?: number; near?: string; maxWalkMin?: number }> = {
+  name: 'find_study_spot',
+  description:
+    '找「现在就能连续坐一会儿」的地方：同时看空教室和图书馆余量，按能坐多久和步行距离排序。用户说「我想自习两小时」「哪能安静看会儿书」就用它。',
+  schema: z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    needMinutes: z.number().int().positive().max(720).optional(),
+    near: z.string().min(1).optional(),
+    maxWalkMin: z.number().int().positive().max(60).optional(),
+  }),
+  async run(args, svc) {
+    const date = args.date ?? todayShanghai();
+    const needMinutes = args.needMinutes ?? 120;
+    const rooms = await svc.freeRooms({ date });
+    let library: Awaited<ReturnType<typeof svc.librarySeats>> | undefined;
+    try {
+      library = await svc.librarySeats(date);
+    } catch {
+      library = undefined; // 校外/断网时图书馆不是必须项
+    }
+    const plan = planStudy({
+      needMinutes,
+      rooms,
+      library,
+      ...(args.near ? { near: args.near } : {}),
+      ...(args.maxWalkMin ? { maxWalkMin: args.maxWalkMin } : {}),
+    });
+    return {
+      text: renderStudyPlan(plan, { date, ...(args.near ? { near: args.near } : {}) }),
+      data: { needMinutes, options: plan.options, libraryNote: plan.libraryNote ?? null },
+    };
+  },
+};
+
 export const TOOLS = {
   get_schedule: getSchedule,
   find_free_room: findFreeRoom,
+  find_study_spot: studySpotTool,
   search_notice: searchNotice,
   get_grades: getGrades,
   get_exams: getExams,

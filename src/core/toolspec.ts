@@ -53,6 +53,25 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     type: 'function',
     function: {
+      name: 'find_study_spot',
+      description:
+        '找现在就能连坐一会儿的地方：把空教室（含能坐多久）和图书馆余量合起来排序。用户说「我想自习两小时」「哪能安静看会儿书」「找个地方学习」就用它，不要连续调 find_free_room + library_seats。',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', description: 'YYYY-MM-DD，默认今天' },
+          needMinutes: { type: 'integer', description: '需要连坐多少分钟，默认 120' },
+          near: { type: 'string', description: '从哪出发（楼名或教室名，如 北3_403）' },
+          maxWalkMin: { type: 'integer', description: '最多愿意走几分钟' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+
+  {
+    type: 'function',
+    function: {
       name: 'get_schedule',
       description:
         '查这名学生自己的课表。可以整周、按天（今天/明天/周几）、按时段（上午/下午/晚上）查。' +

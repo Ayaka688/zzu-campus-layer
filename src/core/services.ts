@@ -223,6 +223,13 @@ export class CampusService {
       // 注意不要用 /room/place/room-occupancy：那个只含借用（RoomBorrow），一天只有个位数，
       // 用它算出来会"全天空闲"，是错的。
       const busy = room.occupied ?? [];
+
+      // 连续空闲窗口：把当天占用区间按时间合并，再取 [8:00, 22:00] 的补集。
+      // 只按节次算会得出"第 5-6 节空"，但学生想知道的是"能连坐多久"。
+      const occupied = busy
+        .map((b) => ({ s: hhmmToMin(b.startAt), e: hhmmToMin(b.endAt) }))
+        .filter((x) => x.e > x.s)
+        .sort((a, b) => a.s - b.s);
       const freeSections: number[] = [];
       for (const unit of units) {
         const clash = busy.some((b) => b.startAt < unit.endTime && b.endAt > unit.startTime);
@@ -230,7 +237,17 @@ export class CampusService {
       }
       if (wanted && !wanted.every((s) => freeSections.includes(s))) continue;
       if (freeSections.length === 0) continue;
-      result.push({ room, freeSections: wanted ?? freeSections });
+      const windows = freeWindows(occupied, DAY_START_MIN, DAY_END_MIN);
+      const longestMin = windows.reduce((m, w) => Math.max(m, w.end - w.start), 0);
+      const nowMin = minutesNowLocal();
+      const nowWindow = windows.find((w) => w.start <= nowMin && nowMin < w.end);
+      result.push({
+        room,
+        freeSections: wanted ?? freeSections,
+        windows,
+        longestMin,
+        ...(nowWindow ? { freeNowMin: nowWindow.end - nowMin } : {}),
+      });
     }
 
     // 有座位信息的正常教室排在前面（很多实验室/办公用房的 seatsForLesson 是 0），
@@ -253,4 +270,55 @@ export class CampusService {
     const key = `lib:${date ?? 'auto'}`;
     return this.memo(key, () => librarySeats(date ? { date } : {}), 60_000);
   }
+}
+
+/** HHmm 整数（如 1010）→ 分钟 */
+export function hhmmToMin(v: number): number {
+  const n = Math.trunc(v);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n / 100) * 60 + (n % 100);
+}
+
+/** 合并占用区间后求补集，得到连续空闲窗口（分钟） */
+export function freeWindows(
+  occupied: Array<{ s: number; e: number }>,
+  fromMin: number,
+  toMin: number,
+): Array<{ start: number; end: number }> {
+  const out: Array<{ start: number; end: number }> = [];
+  let cursor = fromMin;
+  for (const { s, e } of occupied) {
+    if (e <= cursor) continue;
+    if (s > cursor) out.push({ start: cursor, end: Math.min(s, toMin) });
+    cursor = Math.max(cursor, e);
+    if (cursor >= toMin) break;
+  }
+  if (cursor < toMin) out.push({ start: cursor, end: toMin });
+  return out.filter((w) => w.end - w.start >= 20);
+}
+
+const DAY_START_MIN = 8 * 60;
+const DAY_END_MIN = 22 * 60;
+
+/** 本地时间（Asia/Shanghai）下当前是几点几分 */
+export function minutesNowLocal(now = new Date()): number {
+  const s = now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai', hour12: false });
+  const m = /(\d+):(\d+):(\d+)/.exec(s);
+  if (!m) return 0;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** 排序：现在就能坐的优先 → 连坐时长长的优先 → 教室名 */
+export function byDuration<T extends { freeNowMin?: number; longestMin?: number; room: { name: string } }>(
+  list: T[],
+): T[] {
+  return [...list].sort((a, b) => {
+    const an = a.freeNowMin ?? -1;
+    const bn = b.freeNowMin ?? -1;
+    if (an !== bn) return bn - an;
+    const al = a.longestMin ?? 0;
+    const bl = b.longestMin ?? 0;
+    if (al !== bl) return bl - al;
+    return a.room.name.localeCompare(b.room.name);
+  });
 }

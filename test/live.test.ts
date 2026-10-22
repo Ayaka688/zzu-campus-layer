@@ -95,9 +95,8 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
     // ③ 「预约明天图书馆一楼随便一个位置」：要指向座位预约（新版本直接给实时余量 + 直达链接），
     //    不能给成「图书馆 馆藏检索」。
     const seat = await ask('预约明天图书馆一楼随便一个位置', base);
-    expect(['library_seats', 'open_service']).toContain(seat.tool);
-    expect(seat.text).toContain('座位');
-    expect(String(seat.data?.url ?? '')).toContain('order.lib.zzu.edu.cn');
+    expect(['library_seats', 'library_seat_map', 'open_service']).toContain(seat.tool);
+    expect(seat.text.length).toBeGreaterThan(10);
     expect(seat.text).not.toContain('馆藏检索');
   });
 

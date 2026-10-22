@@ -88,6 +88,12 @@ export type Room = z.infer<typeof Room>;
 export const FreeRoom = z.object({
   room: Room,
   freeSections: z.array(z.number().int()),
+  /** 当天的连续空闲区间（分钟计，从 00:00 起），已合并相邻/重叠 */
+  windows: z.array(z.object({ start: z.number().int(), end: z.number().int() })).optional(),
+  /** 最长一段连续空闲有多少分钟 */
+  longestMin: z.number().int().optional(),
+  /** 如果「现在」就在一段空闲里：这间还能坐多久（分钟） */
+  freeNowMin: z.number().int().optional(),
 });
 export type FreeRoom = z.infer<typeof FreeRoom>;
 

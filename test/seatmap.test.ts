@@ -24,7 +24,7 @@ describe('parseSeatMap', () => {
     expect(m.free).toBe(2);
   });
 
-  it('数字状态一律当"未知"（不敢猜 1 是空还是占），并在正文里说明', () => {
+  it('数字状态按实测语义判定（1=可用），并仍能列出座位号', () => {
     const raw = {
       data: {
         seats: [
@@ -35,8 +35,8 @@ describe('parseSeatMap', () => {
     };
     const m = parseSeatMap(raw);
     expect(m.seats.map((s) => s.no)).toEqual(['A1', 'A2']);
-    expect(m.seats.map((s) => s.free)).toEqual([false, false]);
-    expect(renderSeatMap(m)).toContain('数字编码');
+    expect(m.seats.map((s) => s.free)).toEqual([true, false]);
+    expect(renderSeatMap(m)).toContain('共 2 个座位');
   });
 
   it('认不出来时返回空数组，不抛错', () => {

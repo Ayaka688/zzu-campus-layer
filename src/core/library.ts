@@ -143,22 +143,37 @@ const USED_RE = /used|occupied|busy|booked|使用|占用|已约|不可选/i;
 const NUMERIC_STATUS_RE = /^-?\d+$/;
 
 const seatNo = (o: Record<string, unknown>): string => {
-  for (const k of ['no', 'seat_no', 'seatNo', 'num', 'number', 'code', 'name', 'title']) {
+  for (const k of ['no', 'name', 'seat_no', 'seatNo', 'num', 'number', 'code', 'title']) {
     const v = o[k];
     if (typeof v === 'string' || typeof v === 'number') {
-      const s = String(v).trim();
-      if (s && s.length <= 12) return s;
+      const st = String(v).trim();
+      if (st && st.length <= 12) return st;
     }
   }
   return '';
 };
 
+/**
+ * 状态：真实接口同时给 `status`（数字）和 `status_name`（中文）。
+ * 优先用中文名判空/占，数字只作为后备显示。
+ */
 const seatStatus = (o: Record<string, unknown>): string => {
-  for (const k of ['status', 'state', 'seat_status', 'seatStatus', 'use_status', 'type']) {
+  for (const k of ['status_name', 'statusName', 'status', 'state', 'seat_status', 'seatStatus', 'use_status', 'type']) {
     const v = o[k];
-    if (typeof v === 'string' || typeof v === 'number') return String(v);
+    if (typeof v === 'string' || typeof v === 'number') {
+      const st = String(v);
+      if (st !== '') return st;
+    }
   }
   return '';
+};
+
+/** 数字状态码的语义（实测一楼 216 个座位时 status 与 status_name 成对出现，据此确认） */
+const STATUS_NUM: Record<string, { label: string; free: boolean }> = {
+  '1': { label: '可用', free: true },
+  '2': { label: '使用中', free: false },
+  '3': { label: '预约中', free: false },
+  '4': { label: '临时离开', free: false },
 };
 
 /**
@@ -179,7 +194,8 @@ export function parseSeatMap(raw: unknown): LibSeatMap {
     if (typeof node !== 'object') return;
     const obj = node as Record<string, unknown>;
 
-    if (typeof obj.name === 'string' && !out.areaName) out.areaName = obj.name;
+    if (typeof obj.area_name === 'string' && obj.area_name && !out.areaName) out.areaName = obj.area_name;
+    if (typeof obj.name === 'string' && obj.name && !out.areaName) out.areaName = obj.name;
     const t = Number(obj.total_num ?? obj.total);
     if (Number.isFinite(t) && t > 0 && out.total === undefined) out.total = t;
     const f = Number(obj.free_num ?? obj.free);
@@ -193,7 +209,9 @@ export function parseSeatMap(raw: unknown): LibSeatMap {
       (status !== '' || 'x' in obj || 'y' in obj || 'left' in obj || 'top' in obj);
     if (looksLikeSeat && !seen.has(no)) {
       seen.add(no);
-      const free = status !== '' && FREE_RE.test(status) && !USED_RE.test(status);
+      const byName = status !== '' && FREE_RE.test(status) && !USED_RE.test(status);
+      const byNum = STATUS_NUM[status]?.free ?? false;
+      const free = status !== '' ? byName || byNum : false;
       out.seats.push({ no, status, free });
       return;
     }

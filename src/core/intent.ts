@@ -1,3 +1,4 @@
+import { extractNeedMinutes } from './study';
 /**
  * L0 规则意图解析：不依赖任何大模型，覆盖高频说法。
  * 解析不出来就返回 null，由上层给出示例（而不是瞎猜）。
@@ -95,6 +96,7 @@ function extractWeek(text: string): number | undefined {
  * 这里只做最常见的「主校区 + 一楼/二楼」映射；其它说法交给模型或让用户补一句。
  */
 const LIB_AREAS: Array<{ re: RegExp; id: string; name: string }> = [
+  // payload 实测：页面发的是 id="3"（一楼大厅），不是 storeys 里的 2
   { re: /(一楼|1楼|一层|大厅)/, id: '3', name: '一楼大厅' },
   { re: /(二楼|2楼|二层)/, id: '4', name: '二楼' },
   { re: /(三楼|3楼|三层)/, id: '5', name: '三楼' },
@@ -163,6 +165,52 @@ function extractKeyword(text: string): string | undefined {
 
 /** 解析用户输入。返回 null 表示「不在规则覆盖范围内」。 */
 export function parseIntent(text: string, today = todayShanghai()): Intent | null {
+  // STUDY_FIRST：自习类先判，避免被「空教室」抢走（自习不关心哪节没课，关心里能坐多久）
+  {
+    const s0 = text.trim();
+    const sectionish = /第\s*\d|\d+\s*-\s*\d+\s*节/.test(s0);
+    if (
+      !sectionish &&
+      /自习|学习|看书|刷题|写作业|泡馆|安静.{0,4}(?:看|学)|找个地方.{0,4}(?:学|看)/.test(s0)
+    ) {
+    const needMinutes = extractNeedMinutes(s0) ?? 120;
+    const near = resolvePlace(s0)?.raw;
+    return {
+      tool: 'find_study_spot',
+      args: { needMinutes, ...(near ? { near } : {}) },
+      reason: `自习需求 ${needMinutes} 分钟${near ? `，从${near}出发` : ''}`,
+    };
+    }
+  }
+
+  // LIB_FIRST：图书馆/座位的说法必须先判，否则会被「服务直达」规则抢走（只给入口）
+  {
+    const t0 = text.trim();
+    const libish = /图书馆|阅览室/.test(t0) || (/座位|座/.test(t0) && extractLibraryArea(t0));
+    if (libish) {
+      const area = extractLibraryArea(t0);
+      const d0 = extractDate(t0, today);
+      const seatNo = extractSeatNo(t0);
+      if (seatNo && /订|预约|约一个|抢|占/.test(t0)) {
+        return {
+          tool: 'book_library_seat',
+          args: { areaId: (area ?? { id: '3' }).id, date: d0 ?? addDays(today, 1), seatNo },
+          reason: `关键词：订座（${area?.name ?? '一楼大厅'} ${seatNo}）`,
+        };
+      }
+      if (area && /地图|座位图|平面图|哪些|空着|座位|位置|空位|空座/.test(t0)) {
+        return {
+          tool: 'library_seat_map',
+          args: { areaId: area.id, date: d0 ?? today },
+          reason: `关键词：座位图（${area.name}）`,
+        };
+      }
+      if (/座位|位置|空位|空座|还有位|有空|满|几楼|自习/.test(t0)) {
+        return { tool: 'library_seats', args: d0 ? { date: d0 } : {}, reason: '关键词：图书馆座位余量' };
+      }
+    }
+  }
+
   const t = text.trim();
   if (!t) return null;
 
@@ -172,6 +220,17 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
       tool: 'export_ics',
       args: week ? { fromWeek: week } : {},
       reason: '关键词：导出/ics',
+    };
+  }
+
+  // LIB_BY_FLOOR_ONLY：只给楼层 + 「地图/座位图/空着」也走座位图
+  if (/地图|座位图|平面图|哪些座位|空着/.test(t) && extractLibraryArea(t) && !/教室/.test(t)) {
+    const date = extractDate(t, today);
+    const area = extractLibraryArea(t)!;
+    return {
+      tool: 'library_seat_map',
+      args: { areaId: area.id, date: date ?? today },
+      reason: `关键词：座位图（${area.name}）`,
     };
   }
 
@@ -192,7 +251,7 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
 
   // 图书馆座位：问「还有位置吗」「空几个座」走实时余量；只说「预约座位」仍然走服务直达。
   // 放在空教室规则前面，否则「图书馆自习」会被当成「找空教室」。
-  if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|还有位|有空|满|几楼|自习/.test(t)) {
+  if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|还有位|有空|满|几楼|自习|地图|座位图|平面图|哪些|空着/.test(t)) {
     const date = extractDate(t, today);
     const area = extractLibraryArea(t);
     // 只要提到「订/约/抢」就说明想下单；带座位号直接进下单准备，否则先看座位图

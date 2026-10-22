@@ -4,7 +4,13 @@
   "version": "0.2.0",
   "description": "在你自己的校园账号下，把课表、通知、空教室、成绩收进一个侧边栏。",
   "minimum_chrome_version": "114",
-  "permissions": ["storage", "alarms", "sidePanel"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "sidePanel",
+    "scripting",
+    "notifications"
+  ],
   "host_permissions": [
     "https://cas.s.zzu.edu.cn/*",
     "https://uniapp.s.zzu.edu.cn/*",
@@ -34,23 +40,39 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://uniapp.s.zzu.edu.cn/*"],
-      "js": ["content/portal.js"],
+      "matches": [
+        "https://uniapp.s.zzu.edu.cn/*"
+      ],
+      "js": [
+        "content/portal.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://jwxt.zzu.edu.cn/*"],
-      "js": ["content/jwxt.js"],
+      "matches": [
+        "https://jwxt.zzu.edu.cn/*"
+      ],
+      "js": [
+        "content/jwxt.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["http://chat.zzu.edu.cn/*"],
-      "js": ["content/chat.js"],
+      "matches": [
+        "http://chat.zzu.edu.cn/*"
+      ],
+      "js": [
+        "content/chat.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["http://order.lib.zzu.edu.cn/*"],
-      "js": ["content/library.js"],
+      "matches": [
+        "http://order.lib.zzu.edu.cn/*"
+      ],
+      "js": [
+        "content/library.js"
+      ],
       "run_at": "document_idle"
     }
   ]
