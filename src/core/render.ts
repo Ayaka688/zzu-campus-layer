@@ -256,6 +256,10 @@ export function renderLibrarySeats(s: LibrarySeats): string {
   for (const p of sorted) {
     const pct = p.total > 0 ? Math.round((p.free / p.total) * 100) : 0;
     rows.push(`- **${p.name}** 空闲 **${p.free}** / ${p.total}（${pct}%）`);
+    if (p.floors?.length) {
+      const detail = p.floors.map((f) => `${f.name} ${f.free}/${f.total}`).join('，');
+      rows.push(`楼层：${detail}`);
+    }
   }
   const totalFree = sorted.reduce((n, p) => n + p.free, 0);
   const totalAll = sorted.reduce((n, p) => n + p.total, 0);

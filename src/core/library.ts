@@ -18,6 +18,15 @@ export interface LibraryPremise {
   name: string;
   total: number;
   free: number;
+  /** 楼层（`children`）——「一楼还有位置吗」用得上 */
+  floors?: LibraryFloor[];
+}
+
+export interface LibraryFloor {
+  id: string;
+  name: string;
+  total: number;
+  free: number;
 }
 
 export interface LibrarySeats {
@@ -33,6 +42,7 @@ interface RawPremise {
   name?: string;
   total_num?: string | number;
   free_num?: string | number;
+  children?: RawPremise[];
 }
 
 const num = (v: unknown): number => {
@@ -78,12 +88,23 @@ export async function librarySeats(opts: { date?: string } = {}): Promise<Librar
 
   const dates = Array.isArray(json.data.date) ? json.data.date.map(String) : [];
   const picked = date || dates[0] || '';
-  const premises = (json.data.list ?? []).map((p) => ({
-    id: String(p.id ?? ''),
-    name: String(p.name ?? ''),
-    total: num(p.total_num),
-    free: num(p.free_num),
-  }));
+  const premises = (json.data.list ?? []).map((p) => {
+    const floors = Array.isArray(p.children)
+      ? p.children.map((c) => ({
+          id: String(c.id ?? ''),
+          name: String(c.name ?? ''),
+          total: num(c.total_num),
+          free: num(c.free_num),
+        }))
+      : [];
+    return {
+      id: String(p.id ?? ''),
+      name: String(p.name ?? ''),
+      total: num(p.total_num),
+      free: num(p.free_num),
+      ...(floors.length ? { floors } : {}),
+    };
+  });
 
   return {
     date: picked,

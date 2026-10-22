@@ -32,6 +32,36 @@ describe('图书馆座位', () => {
     expect(text).toContain('学号 + 统一身份认证密码');
   });
 
+  it('有楼层数据时逐层列出（「一楼还有位置吗」靠这个）', () => {
+    const text = renderLibrarySeats({
+      date: TODAY,
+      dates: [TODAY],
+      url: librarySeatUrl('1', TODAY),
+      premises: [
+        {
+          id: '1',
+          name: '主校区图书馆',
+          total: 2527,
+          free: 937,
+          floors: [
+            { id: '2', name: '一楼', total: 216, free: 14 },
+            { id: '4', name: '二楼', total: 386, free: 155 },
+          ],
+        },
+      ],
+    });
+    expect(text).toContain('楼层：一楼 14/216，二楼 155/386');
+    expect(text).toContain('空闲 **937** / 2527');
+    // 没有楼层字段时不能凭空造一行「楼层：」
+    const plain = renderLibrarySeats({
+      date: TODAY,
+      dates: [TODAY],
+      url: '',
+      premises: [{ id: '1', name: '主校区图书馆', total: 100, free: 10 }],
+    });
+    expect(plain).not.toContain('楼层：');
+  });
+
   it('没有数据时给可读的一句话', () => {
     const text = renderLibrarySeats({ date: TODAY, dates: [], url: '', premises: [] });
     expect(text).toContain('没拿到座位数据');
