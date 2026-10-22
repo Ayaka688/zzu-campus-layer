@@ -18,7 +18,8 @@ export interface PortalService {
 export const PORTAL_SERVICES: PortalService[] = [
   {
     name: '座位预约',
-    url: 'https://order.lib.zzu.edu.cn/',
+    // 这个站只有 http：443 直接拒连（TLS 没配好），所以链接必须写 http，写 https 用户点开就是空白/证书错
+    url: 'http://order.lib.zzu.edu.cn/h5/index.html#/seat/index',
     group: '图书馆',
     what: '图书馆座位/自习位预约',
     aliases: ['自习', '占座', '抢座', '图书馆座位', '自习室', '预约座位', '预约位置', '图书馆位置', '图书馆一楼', '订座', '找个位置'],

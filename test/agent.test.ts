@@ -55,7 +55,7 @@ describe('agent 循环（支持 function calling 的模型）', () => {
     expect(got.via).toBe('agent');
     expect(got.steps).toEqual(['open_service']);
     expect(got.text).toContain('入口');
-    expect(got.data?.url).toBe('https://order.lib.zzu.edu.cn/');
+    expect(got.data?.url).toBe('http://order.lib.zzu.edu.cn/h5/index.html#/seat/index');
 
     // 第一次请求要带工具规格，第二次要把工具结果回灌
     expect(Array.isArray(bodies[0]?.tools)).toBe(true);
