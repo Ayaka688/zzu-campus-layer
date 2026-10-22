@@ -6,7 +6,7 @@ import { tokenMeta } from '../src/core/jwt';
 import { ask } from '../src/core/agent';
 import { CampusService } from '../src/core/services';
 
-const DIR = process.env.ZZU_TOKEN_DIR ?? '../tmp/zzu';
+const DIR = process.env.ZZU_TOKEN_DIR ?? 'tmp/zzu';
 const path = (f: string) => `${DIR}/${f}`;
 const read = (f: string): string | null => {
   const p = path(f);
@@ -77,8 +77,29 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
     for (const r of rooms) expect(r.room.name).toMatch(/^南[123][_\s（(]/);
   });
 
-  it('通知有标题与摘要', async () => {
-    const notices = await svc.notices({ limit: 3 });
+  it('用户报的三个失败说法，规则层现在要接得住（无模型）', async () => {
+    const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+    const base = { jwxtToken: jwxt!, ...(portal ? { portalToken: portal } : {}), today };
+
+    // ① 「学校最近有比赛吗」：不能只回「没有匹配」，要按话题词扩同义词去搜
+    const race = await ask('学校最近有比赛吗', base);
+    expect(race.tool).toBe('search_notice');
+    expect(race.text.length).toBeGreaterThan(20);
+    expect(race.text).not.toBe('没有匹配「比赛」的通知。');
+
+    // ② 「今天下午我有课吗」：要按时段收窄，不能把整天课表倒出来
+    const noon = await ask('今天下午我有课吗', base);
+    expect(noon.tool).toBe('get_schedule');
+    expect(noon.text).toContain('下午');
+
+    // ③ 「预约明天图书馆一楼随便一个位置」：要指向座位预约入口，不能给成「图书馆 馆藏检索」
+    const seat = await ask('预约明天图书馆一楼随便一个位置', base);
+    expect(seat.tool).toBe('open_service');
+    expect(seat.text).toContain('座位预约');
+    expect(String(seat.data?.url ?? '')).toContain('order.lib.zzu.edu.cn');
+  });
+
+  it('通知有标题与摘要', async () => {    const notices = await svc.notices({ limit: 3 });
     expect(notices.length).toBeGreaterThan(0);
     for (const n of notices) {
       expect(n.title.length).toBeGreaterThan(0);

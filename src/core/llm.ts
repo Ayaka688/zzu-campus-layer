@@ -30,6 +30,8 @@ export interface LlmProvider {
   model: string;
   /** 只有校园网 / VPN 可达 */
   campusOnly?: boolean;
+  /** 是否支持原生 function calling（决定走「工具循环」还是老的 JSON 判意图） */
+  supportsTools?: boolean;
   /** 界面上的一句提示 */
   hint?: string;
 }
@@ -42,19 +44,47 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     baseUrl: `${LLM_BASE}/api`,
     model: DEFAULT_MODEL,
     campusOnly: true,
-    hint: '免费，但只有校园网 / VPN 能连；HTTPS 页面会被混合内容拦掉。',
+    // 学校现在只给 R1（推理模型，带 think 段），没有 function calling；
+    // 走老的「JSON 判意图」路径，别指望它可靠地调工具。
+    supportsTools: false,
+    hint: '免费，但只有校园网 / VPN 能连；只提供 R1，不支持工具调用，请配合第三方模型使用。',
   },
   {
     id: 'deepseek',
     label: 'DeepSeek 官方',
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-chat',
-    hint: '便宜又快，非推理模型更适合判意图。',
+    supportsTools: true,
+    hint: 'deepseek-chat（v4 代）支持工具调用，快且便宜，推荐。',
   },
-  { id: 'siliconflow', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-7B-Instruct' },
-  { id: 'dashscope', label: '阿里百炼', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
-  { id: 'moonshot', label: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
-  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'deepseek/deepseek-chat' },
+  {
+    id: 'siliconflow',
+    label: '硅基流动',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    model: 'Qwen/Qwen2.5-7B-Instruct',
+    supportsTools: true,
+  },
+  {
+    id: 'dashscope',
+    label: '阿里百炼',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus',
+    supportsTools: true,
+  },
+  {
+    id: 'moonshot',
+    label: 'Moonshot',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'moonshot-v1-8k',
+    supportsTools: true,
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'deepseek/deepseek-chat',
+    supportsTools: true,
+  },
 ];
 
 export const DEFAULT_PROVIDER = 'school';
@@ -118,6 +148,8 @@ export interface ChatOptions {
   signal?: AbortSignal;
   /** 限制输出长度：判意图只需要几十个 token，R1 的推理段不该无限长 */
   maxTokens?: number;
+  /** 采样温度（工具循环里给低一点，减少乱填参数） */
+  temperature?: number;
 }
 
 /** 把服务商的 HTTP 错误翻成人话（401/402/403/404/429 各有不同含义）。 */
@@ -139,18 +171,52 @@ function friendlyHttpError(status: number, raw: string, provider: LlmProvider): 
   }
 }
 
-/** 调一次对话补全，返回纯文本（已剥掉 think 段）。 */
-export async function llmChat(
+/** 线上消息（tool_calls / tool 角色都要原样回传，否则服务端会报错）。 */
+export interface WireMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_call_id?: string;
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+}
+
+interface ChatPayload {
+  model: string;
+  messages: WireMessage[];
+  stream: false;
+  max_tokens?: number;
+  temperature?: number;
+  tools?: unknown[];
+  tool_choice?: 'auto';
+}
+
+interface ChatReply {
+  content: string;
+  toolCalls: Array<{ id: string; name: string; argsRaw: string }>;
+  finish: string;
+  ms: number;
+}
+
+/** 一次 POST /chat/completions，统一处理超时、错误翻译、混合内容提示。 */
+async function postChat(
   cfg: Pick<LlmSettings, 'provider' | 'apiKey' | 'model'>,
-  messages: ChatMessage[],
+  build: (provider: LlmProvider) => ChatPayload,
   opts: ChatOptions = {},
-): Promise<string> {
+): Promise<ChatReply> {
   const provider = resolveProvider(cfg.provider);
   if (!cfg.apiKey) throw new LlmError(401, '还没有填 API Key');
+  if (provider.baseUrl.startsWith('http:') && isHttpsPage()) {
+    throw new LlmError(
+      0,
+      `${provider.label} 是 http 服务，HTTPS 页面调不了（混合内容限制）。换成 https 的服务商，或在校园网里用 http 打开。`,
+    );
+  }
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20_000);
+  const timeoutMs = opts.timeoutMs ?? 20_000;
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   if (opts.signal) opts.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+  const t0 = Date.now();
   try {
+    const payload = build(provider);
     const res = await fetch(chatEndpoint(provider), {
       method: 'POST',
       headers: {
@@ -158,12 +224,7 @@ export async function llmChat(
         'content-type': 'application/json',
         accept: 'application/json',
       },
-      body: JSON.stringify({
-        model: cfg.model.trim() || provider.model,
-        messages,
-        stream: false,
-        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
-      }),
+      body: JSON.stringify(payload),
       credentials: 'omit',
       cache: 'no-store',
       signal: ctrl.signal,
@@ -181,22 +242,33 @@ export async function llmChat(
       throw new LlmError(res.status, friendlyHttpError(res.status, msg, provider));
     }
     const json = JSON.parse(raw) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{
+        finish_reason?: string;
+        message?: {
+          content?: string | null;
+          tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
+        };
+      }>;
     };
-    const content = json.choices?.[0]?.message?.content ?? '';
-    return stripThink(content);
+    const choice = json.choices?.[0];
+    const toolCalls = (choice?.message?.tool_calls ?? [])
+      .filter((c) => c.function?.name)
+      .map((c, i) => ({
+        id: c.id ?? `call_${i}`,
+        name: c.function!.name!,
+        argsRaw: c.function?.arguments ?? '{}',
+      }));
+    return {
+      content: stripThink(choice?.message?.content ?? ''),
+      toolCalls,
+      finish: choice?.finish_reason ?? 'stop',
+      ms: Date.now() - t0,
+    };
   } catch (e) {
     if (e instanceof LlmError) throw e;
     const name = (e as { name?: string }).name;
     if (name === 'AbortError') {
-      throw new LlmError(408, `${provider.label} 超时（${Math.round((opts.timeoutMs ?? 20_000) / 1000)}s）`);
-    }
-    // 混合内容是浏览器硬拦，报错里看不出原因，这里直接说人话
-    if (provider.baseUrl.startsWith('http:') && isHttpsPage()) {
-      throw new LlmError(
-        0,
-        `${provider.label} 是 http 服务，HTTPS 页面调不了（混合内容限制）。换成 https 的服务商，或在校园网里用 http 打开。`,
-      );
+      throw new LlmError(408, `${provider.label} 超时（${Math.round(timeoutMs / 1000)}s）`);
     }
     throw new LlmError(
       0,
@@ -207,6 +279,49 @@ export async function llmChat(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** 调一次对话补全，返回纯文本（已剥掉 think 段）。 */
+export async function llmChat(
+  cfg: Pick<LlmSettings, 'provider' | 'apiKey' | 'model'>,
+  messages: ChatMessage[],
+  opts: ChatOptions = {},
+): Promise<string> {
+  const reply = await postChat(
+    cfg,
+    (provider) => ({
+      model: cfg.model.trim() || provider.model,
+      messages,
+      stream: false,
+      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+    }),
+    opts,
+  );
+  return reply.content;
+}
+
+/**
+ * 带工具的一次对话（function calling）。模型可以返回 tool_calls，
+ * 由 `agent.ts` 执行后把结果回灌，再问下一轮。
+ */
+export async function llmChatWithTools(
+  cfg: Pick<LlmSettings, 'provider' | 'apiKey' | 'model'>,
+  messages: WireMessage[],
+  tools: unknown[],
+  opts: ChatOptions = {},
+): Promise<ChatReply> {
+  return postChat(
+    cfg,
+    (provider) => ({
+      model: cfg.model.trim() || provider.model,
+      messages,
+      stream: false,
+      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+      ...(opts.temperature === undefined ? {} : { temperature: opts.temperature }),
+      ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
+    }),
+    opts,
+  );
 }
 
 /** 用页面里的登录会话（WebUI 的 JWT）换一个长期 API Key；不用手动粘贴。 */

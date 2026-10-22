@@ -21,7 +21,7 @@ export const PORTAL_SERVICES: PortalService[] = [
     url: 'https://order.lib.zzu.edu.cn/',
     group: '图书馆',
     what: '图书馆座位/自习位预约',
-    aliases: ['自习', '占座', '抢座', '图书馆座位', '自习室'],
+    aliases: ['自习', '占座', '抢座', '图书馆座位', '自习室', '预约座位', '预约位置', '图书馆位置', '图书馆一楼', '订座', '找个位置'],
   },
   {
     name: '网上办事大厅',
@@ -156,6 +156,8 @@ export const PORTAL_SERVICES: PortalService[] = [
 export interface ServiceMatch {
   service: PortalService;
   score: number;
+  /** 命中的字面长度，仅用于同分排序 */
+  hitLen?: number;
 }
 
 /** 关键词匹配：名字命中 > 别名命中 > 「什么」描述命中。 */
@@ -166,20 +168,49 @@ export function matchServices(keyword: string, limit = 3): ServiceMatch[] {
 
   for (const service of PORTAL_SERVICES) {
     let score = 0;
+    /** 命中的字面长度：同分时更长的说法更具体（「图书馆一楼」应压过「图书馆」） */
+    let hitLen = 0;
     const name = service.name.toLowerCase();
-    if (name === q) score = 100;
-    else if (name.includes(q)) score = 80;
-    else if (q.includes(name)) score = 70;
+    if (name === q) {
+      score = 100;
+      hitLen = name.length;
+    } else if (name.includes(q)) {
+      score = 80;
+      hitLen = q.length;
+    } else if (q.includes(name)) {
+      score = 70;
+      hitLen = name.length;
+    }
     if (!score) {
       for (const alias of service.aliases ?? []) {
         const a = alias.toLowerCase();
-        if (a === q) score = Math.max(score, 90);
-        else if (a.includes(q) || q.includes(a)) score = Math.max(score, 60);
+        if (a === q) {
+          score = Math.max(score, 90);
+          hitLen = Math.max(hitLen, a.length);
+        } else if (q.includes(a)) {
+          // 「预约图书馆一楼的位置」里「图书馆一楼」比服务名「图书馆」更具体，
+          // 所以别名被整句包含时给 78 分，压过「名字被整句包含」的 70 分。
+          score = Math.max(score, 78);
+          hitLen = Math.max(hitLen, a.length);
+        } else if (a.includes(q)) {
+          score = Math.max(score, 70);
+          hitLen = Math.max(hitLen, q.length);
+        }
       }
     }
-    if (!score && service.what.toLowerCase().includes(q)) score = 30;
-    if (score) scored.push({ service, score });
+    if (!score && service.what.toLowerCase().includes(q)) {
+      score = 30;
+      hitLen = q.length;
+    }
+    if (score) scored.push({ service, score, hitLen });
   }
 
-  return scored.sort((a, b) => b.score - a.score || a.service.name.localeCompare(b.service.name, 'zh-Hans-CN')).slice(0, limit);
+  return scored
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        (b.hitLen ?? 0) - (a.hitLen ?? 0) ||
+        a.service.name.localeCompare(b.service.name, 'zh-Hans-CN'),
+    )
+    .slice(0, limit);
 }

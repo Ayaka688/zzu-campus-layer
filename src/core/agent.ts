@@ -1,42 +1,235 @@
 import { CampusService, CampusSession } from './services';
 import { helpText, parseIntent, relativeDayOffset } from './intent';
-import { classifyIntentVerbose, type LlmSettings } from './llm';
-import { ToolName, runTool } from './tools';
-import { addDays, weekdayOf } from './util';
+import {
+  classifyIntentVerbose,
+  llmChatWithTools,
+  resolveProvider,
+  type LlmSettings,
+  type WireMessage,
+} from './llm';
+import { TOOLS, ToolName, runTool } from './tools';
+import { activeToolSpecs } from './toolspec';
+import { addDays, todayShanghai, weekdayOf } from './util';
 
 export interface AskResult {
   text: string;
   tool?: ToolName;
   data?: Record<string, unknown>;
   error?: string;
-  /** 意图来自哪里：规则 / 学校模型判出工具 / 模型直接回答 / 都没命中 */
-  via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+  /**
+   * 这条回答是怎么来的：
+   *  - agent   ：模型带工具循环自己编排（新默认，需要支持 function calling 的模型）
+   *  - rule    ：规则层直接命中（没配模型 / 模型不可用时仍然可用）
+   *  - llm     ：老路径：模型只判一个工具（学校 R1 那种不支持的模型）
+   *  - llm-chat：老路径：模型直接说话
+   *  - none    ：谁都没接住
+   */
+  via?: 'agent' | 'rule' | 'llm' | 'llm-chat' | 'none';
   /** 模型没帮上忙时的原因（界面要显示，否则用户分不清「模型挂了」和「没听懂」） */
   llmError?: string;
   /** 这次调用模型花了多久 */
   llmMs?: number;
   /** 学校 key 失效后自动换了一次并重试成功（由 background 填） */
   llmRefreshed?: boolean;
+  /** agent 模式下这一轮调了哪些工具（按顺序，界面可以画成轨迹） */
+  steps?: string[];
+}
+
+export interface HistoryItem {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 export interface AskOptions {
-  /** 学校模型配置；不传或 enabled=false 时退化成纯规则 */
+  /** 模型配置；不传或 enabled=false 时退化成纯规则 */
   llm?: LlmSettings;
+  /** 最近几轮对话，让「那明天呢」这种追问有上下文 */
+  history?: HistoryItem[];
+  /** 工具循环最多跑几步（默认 4） */
+  maxSteps?: number;
+}
+
+const MAX_HISTORY = 8;
+const MAX_TOOL_PAYLOAD = 3000;
+
+/** 工具返回给模型的内容：正文 + 精简后的结构化数据。 */
+function toolMessage(text: string, data: Record<string, unknown> | undefined): string {
+  const payload = JSON.stringify({ text, ...(data ? { data } : {}) });
+  return payload.length > MAX_TOOL_PAYLOAD ? `${payload.slice(0, MAX_TOOL_PAYLOAD)}…(截断)` : payload;
 }
 
 /**
- * 一句话的完整处理链：
- *   L0 规则解析 → （没命中）L1 学校模型判意图 → 取数 → 模板渲染
- * 模型只决定「调哪个工具」，内容永远来自学校接口的模板渲染。
+ * 用户原话里已经说清楚的相对日期/时段，覆盖模型给的值。
+ * 模型算日期不可靠（实测把「后天」算成明天），这条规则比提示词管用。
  */
-export async function ask(text: string, session: CampusSession, opts: AskOptions = {}): Promise<AskResult> {
-  const today = session.today ?? new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+export function applyTextHints(name: string, args: Record<string, unknown>, text: string, today: string): Record<string, unknown> {
+  const out = { ...args };
+  const off = relativeDayOffset(text);
+  const period = /上午|早上|一早/.test(text)
+    ? 'morning'
+    : /下午|午后/.test(text)
+      ? 'afternoon'
+      : /晚上|夜里|傍晚/.test(text)
+        ? 'evening'
+        : undefined;
+  if (name === 'find_free_room') {
+    if (off !== undefined) out.date = addDays(today, off);
+    if (period && !out.sections) {
+      out.sections = period === 'morning' ? [1, 2, 3, 4] : period === 'afternoon' ? [5, 6, 7, 8] : [9, 10];
+    }
+  }
+  if (name === 'get_schedule') {
+    if (off !== undefined) out.day = off === 0 ? 'today' : off === 1 ? 'tomorrow' : weekdayOf(addDays(today, off));
+    if (period && !out.period) out.period = period;
+  }
+  return out;
+}
 
+function parseToolArgs(raw: string): Record<string, unknown> {
+  const text = (raw ?? '').trim();
+  if (!text) return {};
+  try {
+    const j = JSON.parse(text) as unknown;
+    return j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>) : {};
+  } catch {
+    // 模型偶尔会带 ```json 包裹或尾逗号，抠第一对花括号再试一次
+    const s = text.indexOf('{');
+    const e = text.lastIndexOf('}');
+    if (s >= 0 && e > s) {
+      try {
+        const j = JSON.parse(text.slice(s, e + 1)) as unknown;
+        return j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>) : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+}
+
+/**
+ * 模型当执行核心的循环：给工具规格 → 模型要数据就调工具 → 结果回灌 → 直到它给出回答。
+ *
+ * 与老路径的区别：以前模型只输出 `{"tool":...}` 一个决定，正文永远由模板渲染；
+ * 现在模型自己决定调几次、调哪几个，回答也由它组织（工具结果作为唯一事实来源）。
+ */
+async function runAgent(
+  text: string,
+  session: CampusSession,
+  cfg: LlmSettings,
+  opts: AskOptions,
+): Promise<AskResult> {
+  const today = session.today ?? todayShanghai();
+  const svc = new CampusService(session);
+  const tools = activeToolSpecs();
+  const t0 = Date.now();
+
+  const messages: WireMessage[] = [
+    { role: 'system', content: buildAgentPrompt(today) },
+    ...(opts.history ?? [])
+      .slice(-MAX_HISTORY)
+      .filter((h) => h.content?.trim())
+      .map((h) => ({ role: h.role, content: h.content }) as WireMessage),
+    { role: 'user', content: text },
+  ];
+
+  const used: string[] = [];
+  let lastTool: { name: ToolName; text: string; data?: Record<string, unknown> } | null = null;
+  let answer = '';
+  const maxSteps = opts.maxSteps ?? 4;
+
+  for (let step = 0; step < maxSteps; step += 1) {
+    const reply = await llmChatWithTools(cfg, messages, tools, {
+      // 带工具的模型（deepseek-chat 等）单轮 2-6s，给够余量
+      timeoutMs: 45_000,
+      maxTokens: 1200,
+      temperature: 0.2,
+    });
+
+    if (reply.toolCalls.length === 0) {
+      answer = reply.content.trim();
+      break;
+    }
+
+    messages.push({
+      role: 'assistant',
+      content: reply.content || null,
+      tool_calls: reply.toolCalls.map((c) => ({
+        id: c.id,
+        type: 'function' as const,
+        function: { name: c.name, arguments: c.argsRaw || '{}' },
+      })),
+    });
+
+    for (const call of reply.toolCalls) {
+      const name = call.name as ToolName;
+      if (!(name in TOOLS)) {
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify({ error: `没有叫 ${call.name} 的工具，可用：${Object.keys(TOOLS).join('、')}` }),
+        });
+        continue;
+      }
+      const args = applyTextHints(name, parseToolArgs(call.argsRaw), text, today);
+      used.push(name);
+      try {
+        const result = await runTool(name, args, svc);
+        lastTool = { name, text: result.text, ...(result.data ? { data: result.data } : {}) };
+        messages.push({ role: 'tool', tool_call_id: call.id, content: toolMessage(result.text, result.data) });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: msg }) });
+      }
+    }
+  }
+
+  // 模型一步就停了、没说人话 → 用最后一个工具的结果兜底（宁可给原始数据，也别空着）
+  if (!answer) {
+    if (lastTool) answer = lastTool.text;
+    else answer = '这个我没查到东西，换个说法试试？';
+  }
+
+  return {
+    text: answer,
+    ...(lastTool ? { tool: lastTool.name } : {}),
+    ...(lastTool?.data ? { data: lastTool.data } : {}),
+    via: 'agent',
+    llmMs: Date.now() - t0,
+    ...(used.length ? { steps: used } : {}),
+  };
+}
+
+function buildAgentPrompt(today: string): string {
+  return [
+    '你是「校园信息层」的助手，服务对象是一名郑州大学学生本人。你手里有工具，能直接查他自己的数据。',
+    '',
+    '工作方式：',
+    '- 需要他的真实数据（课表、空教室、通知、成绩、考试、学分、一卡通、待办）时，**调用工具**，不要凭印象回答。',
+    '- 一次没查够可以再调；拿到结果后，用自然的话回答他，就像你在替他查系统。',
+    '- 只使用工具返回的内容。工具没给的数字、课程名、教室名、通知标题，**一律不许编**；查不到就直说没查到。',
+    '- 用户说的是「今天/明天/后天」时，不要自己换算成具体日期，把日期参数留给服务端（工具说明里有写）。',
+    '- 用户要「预约座位」「报名」「交材料」这类**必须本人操作**的事：说明目前只能给入口，不能替他完成，',
+    '  然后用 open_service 给出入口。别假装已经预约成功。',
+    '- 回答用中文，短句为主，可以用 `-` 列表；不要输出 JSON、不要贴大段表格、不要重复用户的问题。',
+    '- 涉及他自己数据时，引用具体值（几点上课、余额多少），但别把整个 JSON 倒出来。',
+    '',
+    '风格：像一个熟悉教务系统、说话干脆的学长。不知道就说不知道。',
+    `今天是 ${today}（周${'一二三四五六日'[weekdayOf(today) - 1] ?? '?'}），时区 Asia/Shanghai。`,
+  ].join('\n');
+}
+
+/** 老路径：规则优先，模型只判一个工具（给不支持 function calling 的模型用）。 */
+async function runClassic(
+  text: string,
+  session: CampusSession,
+  opts: AskOptions,
+): Promise<AskResult> {
+  const today = session.today ?? todayShanghai();
   let intent = parseIntent(text, today);
   let via: AskResult['via'] = intent ? 'rule' : 'none';
   let llmError: string | undefined;
   let llmMs: number | undefined;
-  /** 模型没判工具、而是直接回了句话（「hello」这种） */
   let llmReply: string | undefined;
 
   if (!intent && opts.llm?.enabled && opts.llm.apiKey) {
@@ -53,14 +246,7 @@ export async function ask(text: string, session: CampusSession, opts: AskOptions
   }
 
   if (!intent) {
-    // 模型愿意说话就让它说（闲聊、解释、反问），说完也不必再列功能清单
-    if (llmReply) {
-      return {
-        text: llmReply,
-        via: 'llm-chat',
-        ...(llmMs ? { llmMs } : {}),
-      };
-    }
+    if (llmReply) return { text: llmReply, via: 'llm-chat', ...(llmMs ? { llmMs } : {}) };
     return {
       text: helpText(today),
       via: 'none',
@@ -69,13 +255,10 @@ export async function ask(text: string, session: CampusSession, opts: AskOptions
     };
   }
 
-  // 模型算日期不可靠（实测把「后天」算成明天），
-  // 所以「今天/明天/后天/大后天」这类相对日期一律由规则层覆盖。
   if (via === 'llm') {
     const off = relativeDayOffset(text);
-    if (off !== undefined) {
-      if (intent.tool === 'find_free_room') intent.args.date = addDays(today, off);
-      else if (intent.tool === 'get_schedule') intent.args.day = off === 0 ? 'today' : weekdayOf(addDays(today, off));
+    if (off !== undefined || /上午|下午|晚上/.test(text)) {
+      intent.args = applyTextHints(intent.tool, intent.args as Record<string, unknown>, text, today);
     }
   }
 
@@ -92,5 +275,28 @@ export async function ask(text: string, session: CampusSession, opts: AskOptions
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return { text: `出错了：${message}`, tool: intent.tool, via, error: message, ...(llmMs ? { llmMs } : {}) };
+  }
+}
+
+/**
+ * 一句话的完整处理链。
+ *
+ * 有支持 function calling 的模型 → 模型当执行核心（工具循环，回答也由它组织）；
+ * 没有模型 / 模型不支持工具 → 退化成规则层（离线也能查课表），
+ * 中途模型挂了也会回落到规则层，并把原因带在 `llmError` 里。
+ */
+export async function ask(text: string, session: CampusSession, opts: AskOptions = {}): Promise<AskResult> {
+  const cfg = opts.llm;
+  const canUseTools = Boolean(cfg?.enabled && cfg.apiKey && resolveProvider(cfg.provider).supportsTools);
+
+  if (!canUseTools) return runClassic(text, session, opts);
+
+  try {
+    return await runAgent(text, session, cfg as LlmSettings, opts);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // 模型这条路挂了（没网/401/超时），但规则层还能用——别让用户什么都没查到
+    const fallback = await runClassic(text, session, opts);
+    return { ...fallback, llmError: message };
   }
 }

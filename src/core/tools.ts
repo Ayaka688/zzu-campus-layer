@@ -21,6 +21,7 @@ export interface ToolDefinition<A> {
 }
 
 const dayArg = z.union([z.literal('today'), z.literal('tomorrow'), z.number().int().min(1).max(7)]).optional();
+const periodArg = z.union([z.literal('morning'), z.literal('afternoon'), z.literal('evening')]).optional();
 
 function resolveDay(day: 'today' | 'tomorrow' | number | undefined, today: string): { weekday: number; date: string } {
   if (day === undefined) return { weekday: 0, date: today };
@@ -29,12 +30,32 @@ function resolveDay(day: 'today' | 'tomorrow' | number | undefined, today: strin
   return { weekday: weekdayOf(date), date };
 }
 
-export const getSchedule: ToolDefinition<{ week?: number; day?: 'today' | 'tomorrow' | number }> = {
+/** 上午 1-4 节 / 下午 5-8 节 / 晚上 9-10 节，按开始时间判。 */
+export function inPeriod(startTime: string, period: 'morning' | 'afternoon' | 'evening'): boolean {
+  const hour = Number(startTime.slice(0, 2));
+  if (!Number.isFinite(hour)) return true;
+  if (period === 'morning') return hour < 12;
+  if (period === 'afternoon') return hour >= 12 && hour < 18;
+  return hour >= 18;
+}
+
+const PERIOD_LABEL: Record<'morning' | 'afternoon' | 'evening', string> = {
+  morning: '上午',
+  afternoon: '下午',
+  evening: '晚上',
+};
+
+export const getSchedule: ToolDefinition<{
+  week?: number;
+  day?: 'today' | 'tomorrow' | number;
+  period?: 'morning' | 'afternoon' | 'evening';
+}> = {
   name: 'get_schedule',
-  description: '查询课表：默认当前教学周，可按周次或按天过滤。',
+  description: '查询课表：默认当前教学周，可按周次、按天、按时段（上午/下午/晚上）过滤。',
   schema: z.object({
     week: z.number().int().min(0).max(30).optional(),
     day: dayArg,
+    period: periodArg,
   }),
   async run(args, svc) {
     const term = await svc.term();
@@ -43,10 +64,23 @@ export const getSchedule: ToolDefinition<{ week?: number; day?: 'today' | 'tomor
     const today = todayShanghai();
     const { weekday, date } = resolveDay(args.day, today);
     if (weekday) courses = courses.filter((c) => c.weekday === weekday);
+    if (args.period) courses = courses.filter((c) => inPeriod(c.startTime, args.period!));
     const text = renderCourseTable(courses, { term, ...(week ? { week } : {}) });
+    // 指定了「某天 / 某时段」却一条都没有时，别直接甩「课表为空」，
+    // 要说清楚是那个时段没课——否则用户以为查错了。
+    const label = args.period ? PERIOD_LABEL[args.period] : '';
+    const head = weekday ? `${date}${label ? ` ${label}` : ''}` : label ? `本${label}` : '';
+    const empty = courses.length === 0 && (weekday > 0 || Boolean(args.period));
+    const body = empty ? `${head ? `${head} · ` : ''}没有课。` : head ? `${head} · ${text}` : text;
     return {
-      text: weekday ? `${date} · ${text}` : text,
-      data: { count: courses.length, week: week ?? null, courses },
+      text: body,
+      data: {
+        count: courses.length,
+        week: week ?? null,
+        ...(args.period ? { period: args.period } : {}),
+        ...(weekday ? { date } : {}),
+        courses,
+      },
     };
   },
 };
@@ -111,19 +145,83 @@ export const findFreeRoom: ToolDefinition<{
   },
 };
 
-export const searchNotice: ToolDefinition<{ keyword?: string; limit?: number }> = {
+/**
+ * 关键词 → 同义词组。学生说「有比赛吗」时，通知标题里写的是「创新创业大赛」「学科竞赛」，
+ * 直接 includes 匹配必然 0 条（这是实测踩过的坑）。
+ */
+const SYNONYMS: Array<{ test: RegExp; expand: string[] }> = [
+  { test: /比赛|竞赛|赛事|大赛/, expand: ['比赛', '竞赛', '大赛', '挑战杯', '创新创业', '选拔', '赛区', '选拔赛'] },
+  { test: /奖助|奖学金|助学金|评奖|评优/, expand: ['奖学金', '助学金', '评奖', '评优', '资助', '困难'] },
+  { test: /实习|就业|招聘|求职/, expand: ['实习', '就业', '招聘', '双选', '宣讲'] },
+  { test: /重修|补考|挂科|清考/, expand: ['重修', '补考', '重考'] },
+  { test: /选课|退课|选课/, expand: ['选课', '退课', '选课通知'] },
+  { test: /四六级|英语四六级|CET/i, expand: ['四六级', 'CET', '英语'] },
+  { test: /党课|党员|团|团员/, expand: ['党课', '党员', '团员', '团课'] },
+  { test: /讲座|报告|论坛|学术/, expand: ['讲座', '报告', '论坛', '学术'] },
+  { test: /考试|考场|监考/, expand: ['考试', '考场', '监考'] },
+  { test: /放假|假期|开学|报到/, expand: ['放假', '假期', '开学', '报到'] },
+];
+
+export function expandQuery(query: string | undefined): string[] {
+  const q = (query ?? '').trim();
+  if (!q) return [];
+  const terms = new Set<string>([q]);
+  // 中文没有空格分词，整句只取 2-6 字的片段做补充词，避免把「学校最近有比赛吗」整个当关键词
+  const cleaned = q.replace(/[有吗呢啊？?。，,、\s]|学校|最近|这个|那个|上的|里的/g, '');
+  if (cleaned.length >= 2) terms.add(cleaned);
+  for (const rule of SYNONYMS) {
+    if (rule.test.test(q)) for (const w of rule.expand) terms.add(w);
+  }
+  return [...terms];
+}
+
+export const searchNotice: ToolDefinition<{ query?: string; keyword?: string; days?: number; limit?: number }> = {
   name: 'search_notice',
-  description: '查通知公告：按关键词在标题与摘要里搜（门户只有 200 字摘要，教务处通知有全文）。',
+  description:
+    '查通知公告（教务处全文 + 门户摘要）。按关键词做同义词扩展匹配，可按最近 N 天过滤，结果按发布时间倒序。',
   schema: z.object({
+    /** 新的口语参数：用户原话里的关键词 */
+    query: z.string().min(1).optional(),
+    /** 老参数，规则层还在用 */
     keyword: z.string().min(1).optional(),
+    days: z.number().int().min(1).max(365).optional(),
     limit: z.number().int().min(1).max(50).optional(),
   }),
   async run(args, svc) {
-    const notices = await svc.notices({
-      ...(args.keyword ? { keyword: args.keyword } : {}),
-      limit: args.limit ?? 10,
-    });
-    return { text: renderNotices(notices, args.keyword), data: { count: notices.length, notices } };
+    const raw = args.query ?? args.keyword ?? '';
+    const terms = expandQuery(raw);
+    const limit = args.limit ?? 10;
+    // 关键词命中经常只有个位数，先多抓一些再过滤（服务端 limit 是抓取量，不是结果量）
+    const pool = await svc.notices({ limit: terms.length ? 40 : limit });
+    let list = pool;
+    if (args.days) {
+      const cutoff = Date.now() - args.days * 86_400_000;
+      list = list.filter((n) => {
+        const t = n.publishedAt ? Date.parse(n.publishedAt.replace(/-/g, '/')) : NaN;
+        return Number.isFinite(t) ? t >= cutoff : true;
+      });
+    }
+    if (terms.length) {
+      const hit = list.filter((n) => {
+        const hay = `${n.title} ${n.summary}`;
+        return terms.some((t) => hay.includes(t));
+      });
+      if (hit.length) {
+        return {
+          text: renderNotices(hit.slice(0, limit), raw),
+          data: { count: hit.length, terms, notices: hit.slice(0, limit) },
+        };
+      }
+      // 没命中：给出「最近的通知」并说明没匹配上，别只回一句「没有」
+      const recent = list.slice(0, Math.min(5, limit));
+      const lines = [`没有匹配「${raw}」的通知（试过：${terms.slice(0, 6).join('、')}）。`, ''];
+      if (recent.length) {
+        lines.push('最近的通知是这些，看有没有你要的：');
+        for (const n of recent) lines.push(`- ${n.publishedAt?.slice(0, 10) ?? ''} ${n.title}`);
+      }
+      return { text: lines.join('\n'), data: { count: 0, terms, notices: recent } };
+    }
+    return { text: renderNotices(list.slice(0, limit)), data: { count: list.length, notices: list.slice(0, limit) } };
   },
 };
 

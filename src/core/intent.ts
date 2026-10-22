@@ -16,6 +16,44 @@ export interface Intent {
 
 type DayArg = 'today' | 'tomorrow' | number;
 
+export type Period = 'morning' | 'afternoon' | 'evening';
+
+/** 时段 → 默认节次（用户只说「下午」时用）。 */
+const PERIOD_SECTIONS: Record<Period, number[]> = {
+  morning: [1, 2, 3, 4],
+  afternoon: [5, 6, 7, 8],
+  evening: [9, 10],
+};
+
+/** 通知类问题里常见的话题词：用户常直接说话题，不说「通知」二字。 */
+const NOTICE_TOPICS = [
+  '比赛',
+  '竞赛',
+  '大赛',
+  '挑战杯',
+  '奖学金',
+  '助学金',
+  '评奖',
+  '评优',
+  '实习',
+  '招聘',
+  '重修',
+  '选课',
+  '四六级',
+  '党课',
+  '讲座',
+  '论坛',
+  '放假',
+  '保研',
+];
+
+/** 「上午/下午/晚上」→ 时段。规则层用它把「今天下午有课吗」收窄。 */export function extractPeriod(text: string): Period | undefined {
+  if (/上午|早上|早晨|一早/.test(text)) return 'morning';
+  if (/下午|半晌/.test(text)) return 'afternoon';
+  if (/晚上|夜里|傍晚/.test(text)) return 'evening';
+  return undefined;
+}
+
 /** 「今天/明天/后天/大后天」→ 偏移天数。规则层和 L1 兜底共用。 */
 export function relativeDayOffset(text: string): number | undefined {
   if (/大后天/.test(text)) return 3;
@@ -109,7 +147,8 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
 
   if (/空教室|自习室|空闲教室|没课的教室|自习|哪里有?座/.test(t)) {
     const date = extractDate(t, today);
-    const sections = extractSections(t);
+    const period = extractPeriod(t);
+    const sections = extractSections(t) ?? (period ? PERIOD_SECTIONS[period] : undefined);
     const minSeats = extractSeats(t);
     const campus = /(主校区|南校区|北校区|东校区|西校区|新校区)/.exec(t)?.[1];
     // 地点词（南核 / 北核 / 北1 / 物理馆）单独传给工具按教室名前缀过滤，
@@ -154,11 +193,13 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     return { tool: 'get_todos', args: {}, reason: '关键词：待办' };
   }
 
-  if (/通知|公告|新闻|消息/.test(t)) {
-    const keyword = extractKeyword(t);
+  if (/通知|公告|新闻|消息|比赛|竞赛|大赛|挑战杯|评奖|评优|重修|选课|讲座|论坛|招聘|实习/.test(t)) {
+    // 用户不一定说「查 XX 的通知」。像「学校最近有比赛吗」，关键词就是那个话题词；
+    // 拿到话题词后由 tools.expandQuery 再扩成同义词组，避免「比赛」搜不到「竞赛」。
+    const keyword = extractKeyword(t) ?? NOTICE_TOPICS.find((w) => t.includes(w));
     const limit = /最新|最近/.test(t) ? 5 : undefined;
     const args: Record<string, unknown> = {};
-    if (keyword) args.keyword = keyword;
+    if (keyword) args.query = keyword;
     if (limit) args.limit = limit;
     return { tool: 'search_notice', args, reason: '关键词：通知/公告' };
   }
@@ -166,9 +207,11 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
   if (/课表|有课|上课|课程|几节课|[周星期礼拜][一二三四五六日天1-7].*课|明天.*课|今天.*课/.test(t)) {
     const week = extractWeek(t);
     const day = extractDay(t, today);
+    const period = extractPeriod(t);
     const args: Record<string, unknown> = {};
     if (week !== undefined) args.week = week;
     if (day !== undefined) args.day = day;
+    if (period) args.period = period;
     return { tool: 'get_schedule', args, reason: '关键词：课表' };
   }
 

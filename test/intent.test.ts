@@ -50,7 +50,7 @@ describe('L0 规则意图解析', () => {
   it('通知类问法', () => {
     const kw = parseIntent('查一下「AI 智能体大赛」的通知', TODAY);
     expect(kw?.tool).toBe('search_notice');
-    expect(kw?.args).toMatchObject({ keyword: 'AI 智能体大赛' });
+    expect(kw?.args).toMatchObject({ query: 'AI 智能体大赛' });
   });
 
   it('成绩与考试', () => {
@@ -60,6 +60,25 @@ describe('L0 规则意图解析', () => {
 
   it('导出日历', () => {
     expect(parseIntent('把课表导出成日历', TODAY)?.tool).toBe('export_ics');
+  });
+
+  it('时段要收窄：「今天下午我有课吗」不是「今天有课吗」', () => {
+    const got = parseIntent('今天下午我有课吗', TODAY);
+    expect(got?.tool).toBe('get_schedule');
+    expect(got?.args).toMatchObject({ day: 'today', period: 'afternoon' });
+    expect(parseIntent('明天上午有课吗', TODAY)?.args).toMatchObject({ day: 'tomorrow', period: 'morning' });
+  });
+
+  it('空教室按时段补节次：「明天下午的空教室」→ 5-8 节', () => {
+    const got = parseIntent('明天下午有空教室吗', TODAY);
+    expect(got?.tool).toBe('find_free_room');
+    expect(got?.args).toMatchObject({ sections: [5, 6, 7, 8] });
+  });
+
+  it('只给话题不给「通知」也能搜：「学校最近有比赛吗」', () => {
+    const got = parseIntent('学校最近有比赛吗', TODAY);
+    expect(got?.tool).toBe('search_notice');
+    expect(got?.args).toMatchObject({ query: '比赛', limit: 5 });
   });
 
   it('覆盖不到的说法返回 null，而不是瞎猜', () => {

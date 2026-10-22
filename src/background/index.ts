@@ -18,7 +18,7 @@ import { TOOLS, runTool } from '../core/tools';
 
 type Incoming =
   | { type: 'token'; source: TokenSource | 'chat'; token: string; reason?: string }
-  | { type: 'ask'; text: string }
+  | { type: 'ask'; text: string; history?: Array<{ role: 'user' | 'assistant'; content: string }> }
   | { type: 'status' }
   | { type: 'clear' }
   | { type: 'tool'; tool: keyof typeof TOOLS; args?: unknown }
@@ -86,7 +86,8 @@ async function handle(message: Incoming): Promise<Reply> {
         };
       }
       const llm = await getLlmSettings();
-      let result = await ask(message.text, session, { llm });
+      const extra = { llm, ...(message.history?.length ? { history: message.history } : {}) };
+      let result = await ask(message.text, session, extra);
 
       // 学校那边的 sk- key 会失效（会话过期/被重置）。手上有 WebUI 会话就自动换一次再重试，
       // 免得用户看到「API Key 无效」还得自己去设置里点同步。
@@ -96,7 +97,7 @@ async function handle(message: Incoming): Promise<Reply> {
           try {
             const key = await mintApiKey(chat.token);
             const next = await setLlmSettings({ apiKey: key, enabled: true });
-            result = await ask(message.text, session, { llm: next });
+            result = await ask(message.text, session, { ...extra, llm: next });
             result = { ...result, ...(result.llmError ? {} : { llmRefreshed: true }) };
           } catch {
             /* 换不到就保留原来的错误 */

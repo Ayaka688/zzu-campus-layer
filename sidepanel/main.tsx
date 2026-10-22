@@ -18,7 +18,9 @@ interface Message {
   tool?: string;
   data?: Record<string, unknown>;
   error?: boolean;
-  via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+  via?: 'agent' | 'rule' | 'llm' | 'llm-chat' | 'none';
+  /** agent 模式这一轮调过的工具，按顺序 */
+  steps?: string[];
   /** 模型没帮上忙的原因 */
   llmError?: string;
 }
@@ -104,12 +106,17 @@ function App() {
         tool?: string;
         data?: Record<string, unknown>;
         error?: string;
-        via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+        via?: 'agent' | 'rule' | 'llm' | 'llm-chat' | 'none';
+        steps?: string[];
         llmError?: string;
         llmMs?: number;
       }>({
         type: 'ask',
         text: question,
+        history: messages
+          .slice(-6)
+          .filter((m) => m.text.trim())
+          .map((m) => ({ role: m.role, content: m.text })),
       });
       if (res.ok && res.data) {
         setMessages((m) => [
@@ -120,6 +127,7 @@ function App() {
             ...(res.data!.tool ? { tool: res.data!.tool } : {}),
             ...(res.data!.data ? { data: res.data!.data } : {}),
             ...(res.data!.via ? { via: res.data!.via } : {}),
+            ...(res.data!.steps ? { steps: res.data!.steps } : {}),
             ...(res.data!.llmError ? { llmError: res.data!.llmError } : {}),
           },
         ]);
@@ -295,8 +303,13 @@ function App() {
                   打开 {typeof m.data.name === 'string' ? m.data.name : '链接'} ↗
                 </a>
               )}
+              {m.role === 'assistant' && !m.error && m.via === 'agent' && (
+                <em class="via">
+                  模型编排{m.steps?.length ? ` · ${m.steps.join(' → ')}` : ''}
+                </em>
+              )}
               {m.role === 'assistant' && !m.error && m.via === 'llm' && <em class="via">由模型判定</em>}
-            {m.role === 'assistant' && !m.error && m.via === 'llm-chat' && <em class="via">由模型回答</em>}
+              {m.role === 'assistant' && !m.error && m.via === 'llm-chat' && <em class="via">由模型回答</em>}
               {m.role === 'assistant' && !m.error && m.llmError && (
                 <p class="hint warn">
                   模型没帮上忙：{m.llmError}

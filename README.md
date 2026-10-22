@@ -13,7 +13,8 @@
 | --- | --- | --- |
 | 「明天有课吗」「今天有课吗」「第 8 周课表」 | 按天/按周列课表，含教室与教师；**可选附一张校园地图**（自己放图，见下） | 教务 `/lesson/student/course-table` + 可选 `public/map/campus.jpg` |
 | 「明天南核空教室」「北1 下午哪间空着」 | 按教学区/楼过滤：全部教室 − 当天占用，算出空闲节次 | 教务 `/room/place/rooms` + `/room/place/room-occupancy` |
-| 「查一下 XX 的通知」 | 教务通知（完整正文）+ 门户通知（摘要） | 教务 `/protal-notice/get-notices` + 门户 CMS |
+| 「今天下午我有课吗」「明天上午有课吗」 | 按时段收窄，只列那个时段的课（不再把整天倒出来） | 教务课表 + 本地时段表 |
+| 「查一下 XX 的通知」「学校最近有比赛吗」 | 教务通知（完整正文）+ 门户通知（摘要）；**口语话题自动扩同义词**（比赛→竞赛/大赛/挑战杯…） | 教务 `/protal-notice/get-notices` + 门户 CMS |
 | 「我这学期绩点多少」「考试安排」 | 成绩 / 考试列表 | 教务 `/grade/student/grades`、`/exam/student/exam` |
 | 「我还差多少学分毕业」「培养方案完成情况」 | 按模块列要求/已通过/在修/还差，并用进度条画出缺口 | 教务 `/plan/search/completion/info?code=01` |
 | 「打开座位预约」「报修在哪」「食堂怎么订餐」 | 从 19 项门户服务里认出你要的，直接给官方入口（面板里是可点按钮） | 本地服务目录 `src/core/catalog.ts`（来自门户 `/v2/service/serviceShowAll`） |
@@ -21,16 +22,22 @@
 | 「有什么要办的事」「待办事项」 | 待办/在办/待申请计数，紧急与超时单独标出 | 事务中心 `/ttc/v1/count/ttcCount` + `/ttc/api/ttc/center-list/getToDoList` |
 | 「把课表导出成日历」 | 生成带 `Asia/Shanghai` 时区的 `.ics` | 本地生成 |
 
-**没有 LLM 也能用**：意图解析是规则层（`src/core/intent.ts`），回答是模板渲染（`src/core/render.ts`）。模型只是可选的增强，不是前置依赖。
+**没有 LLM 也能用**：意图解析是规则层（`src/core/intent.ts`），回答是模板渲染（`src/core/render.ts`）。模型是可选的增强，不是前置依赖。
 
-## 模型兜底（可选，两种来源）
+## 模型怎么参与（两种模式）
 
-意图解析默认是规则层（`src/core/intent.ts`），回答是模板渲染（`src/core/render.ts`）。模型只做**两件事**：
+规则层仍然先跑（免费、几十毫秒、离线可用）。模型是不是「执行核心」取决于服务商**是否支持 function calling**：
 
-1. 规则没命中时判断该调哪个工具——输出 `{tool, args}`，正文仍由模板渲染，所以它判错最多是查错东西，不会编数据；
-2. 这句话压根不用查数据（打招呼、问你是谁、问怎么用、一般常识）——直接用中文正常回答，不再甩一屏功能清单。这类回答在界面上挂「由模型回答」的标记，`via: 'llm-chat'`。
+| 模式 | 谁在用 | 模型干什么 |
+| --- | --- | --- |
+| **Agent 循环** | DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter | 模型自己决定「调哪个工具、传什么参数」→ 拿到真实数据后**自己组织自然语言回答**；一轮不够可以继续调（最多 4 步）。工具规格在 `src/core/toolspec.ts`，10 个工具全覆盖 |
+| **判意图** | 学校 DeepSeek（只有 `DeepSeek-R1`，Open WebUI 不暴露 tools） | 只输出 `{tool,args}`，正文由模板渲染 |
 
-第 2 条是后加的：早先问「hello」只会回一张能力清单，很像坏掉的机器人。代价是每条没被规则命中的话都要过一次模型（R1 11–25 秒，`deepseek-chat` 约 1 秒）。
+Agent 模式下模型看到的是工具返回的**真实 JSON**，提示词里写死：只许用工具返回的内容、不许编数字/课程名/通知标题、相对日期不许自己换算（由 `applyTextHints` 按用户原话覆盖）、预约报名这类必须本人操作只能给入口且不许假装成功。所以「模型幻觉」变成「答得不好」，不会变成「编出假课表」。
+
+界面上会显示这轮模型调了哪些工具（例如 `模型编排 · find_free_room`），出问题一眼能看出是它没调工具还是调错了。面板与手机版都会把最近 3 轮对话带上去（`history`），「那明天呢」不用重复整句。
+
+代价：工具循环通常 1–3 秒（`deepseek-chat` 这类非推理模型），超时上限 45 秒；学校 R1 走老模式，11–25 秒。
 
 服务商是预设的六选一（`src/core/llm.ts` 的 `LLM_PROVIDERS`），换服务商时模型名会自动填成该家的默认值：
 
@@ -68,9 +75,10 @@
 
 ### 注意事项
 
-- 学校那条：R1 会先想再答，实测一次意图判定 **11–18 秒**（free-chat 也在这个量级），所以它只是兜底，不是主路径；超时（30s）或失败都回落成反问。
-- HTTPS 页面 + 学校预设 = 直接放弃（不白等 30 秒），界面会就地提示换服务商。
-- 不填 key 就完全离线，功能不受影响。
+- 想让它「像 GPT 一样能自己查、自己答」，就选**支持 function calling 的服务商**（DeepSeek 官方那家最省事，`deepseek-chat` 一次 1–3 秒）。
+- 学校那条（R1）**不支持 tools**，只能走老模式（判意图 + 模板），而且会先想再答，实测一次 **11–25 秒**；所以它只适合偶尔兜底。超时 45 秒后回落成反问。
+- HTTPS 页面 + 学校预设 = 直接放弃（不白等），界面会就地提示换服务商。
+- 不填 key 就完全离线，功能不受影响（规则层 + 模板）。
 
 ### 连不上时会怎样
 
@@ -196,10 +204,11 @@ src/core/        与运行环境无关的纯逻辑（可 node 下单测，扩展
   intent.ts      L0 规则意图解析
   catalog.ts     门户服务目录（19 项）+ 关键词匹配，供「一句话直达」用
   place.ts       地点口语词 → 教室名前缀（南核→南1–南3、物理馆→物…）
-  llm.ts         L1 兜底：6 家服务商预设（学校 Open WebUI / DeepSeek / 硅基流动 / 百炼 / Moonshot / OpenRouter）+ 意图判定 / 自由回答 + 参数收敛 + 连通性探测
+  llm.ts         L1 兜底：6 家服务商预设（学校 Open WebUI / DeepSeek / 硅基流动 / 百炼 / Moonshot / OpenRouter）+ 意图判定 + 参数收敛 + 连通性探测 + llmChatWithTools（function calling）
   tools.ts       10 个工具定义（schema + run）
   storage.ts     token / LLM 设置 / 状态（经 kv.ts，两种运行环境通用）
-  agent.ts       ask(text) → 一句话 → 工具调用 → 回答
+  toolspec.ts    给模型看的工具规格（OpenAI tools JSON Schema，手写，描述即提示词）
+agent.ts       ask(text) → 规则优先；能调工具时进 runAgent 循环（最多 4 步，带 history），否则走老的判意图路径
 src/ui/rich.tsx  面板与 PWA 共用的渲染件（轻量 markdown、校园地图、下载）
 src/ui/llm-fields.tsx  面板与 PWA 共用的模型设置控件（服务商 / key / 模型名）
 src/background/  service worker：消息路由、sidePanel、alarms
@@ -282,7 +291,8 @@ npm run pwa:shot         # 真浏览器：无头 Edge + 移动视口跑 PWA（�
 - **成绩 / 考试**：接口通，但大一当前学期无数据（`data: []`），不是实现问题。
 - **通知全文**：教务侧完整 HTML 可得；门户 CMS 的 `content` 被服务端硬截 200 字，官网原文需要登录才能抓，不抓。
 - **空教室**：见上，全校 379 间可上课教室，一次约 4s（并发翻页），之后 60s 缓存；教室座位数基本为空。
-- **模型兜底是可选、且慢**：L0 规则没命中时才会问模型；它要么判工具（`{tool,args}`，正文仍模板渲染），要么直接闲聊回答。学校 R1 有推理段，一次 11–25 秒（校外连不上）；换成第三方预设（DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter）是 0.5–2 秒。不填 key 就完全离线。
+- **模型是可选增强，但「工具循环」有条件**：只有支持 function calling 的服务商才会进 agent 循环（DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter）；学校那把只有 R1、Open WebUI 不暴露 tools，只能走老的「判意图 + 模板」路径。不填 key 就完全离线。
+- **规则层仍然先跑**：像「明天南核空教室」「今天下午有课吗」「学校最近有比赛吗」这类高频说法，规则层直接命中（几十毫秒），根本不会花模型的钱。
 - **权限**：只申请 14 个域（8 个学校域 + `http://chat.zzu.edu.cn/*` + 5 家模型服务商），不申请 `<all_urls>`；没有自定义 `baseUrl`，所以不需要 `optional_host_permissions` 去弹授权。
 - **一卡通 / 待办**：接口通，本号余额 `¥0`、待办全 0（确实没消费、没待办）；`message-service` 的未读数接口回 500，未读消息暂不做。
 - **token 存储**：只在 `chrome.storage.local`，不出本机。`X-Id-Token` 等同于登录态，别导出这个扩展的存储。

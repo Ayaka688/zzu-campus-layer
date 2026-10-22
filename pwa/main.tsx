@@ -24,7 +24,9 @@ interface Message {
   tool?: string;
   data?: Record<string, unknown>;
   error?: boolean;
-  via?: 'rule' | 'llm' | 'llm-chat' | 'none';
+  via?: 'agent' | 'rule' | 'llm' | 'llm-chat' | 'none';
+  /** agent 模式这一轮调过的工具，按顺序 */
+  steps?: string[];
   /** 模型没帮上忙的原因 */
   llmError?: string;
 }
@@ -98,7 +100,14 @@ function App() {
         setSheet('login');
         return;
       }
-      const res = await ask(question, session, { llm });
+      const res = await ask(question, session, {
+        llm,
+        // 把最近几轮带上，模型才接得住「那明天呢」这种追问
+        history: messages
+          .slice(-6)
+          .filter((m) => m.text.trim())
+          .map((m) => ({ role: m.role, content: m.text })),
+      });
       setMessages((m) => [
         ...m,
         {
@@ -107,6 +116,7 @@ function App() {
           ...(res.tool ? { tool: res.tool } : {}),
           ...(res.data ? { data: res.data } : {}),
           ...(res.via ? { via: res.via } : {}),
+          ...(res.steps ? { steps: res.steps } : {}),
           ...(res.llmError ? { llmError: res.llmError } : {}),
           ...(res.error ? { error: true } : {}),
         },
@@ -240,6 +250,11 @@ function App() {
                 <a class="go" href={m.data.url} target="_blank" rel="noreferrer">
                   打开 {typeof m.data.name === 'string' ? m.data.name : '链接'} ↗
                 </a>
+              )}
+              {m.role === 'assistant' && !m.error && m.via === 'agent' && (
+                <em class="via">
+                  模型编排{m.steps?.length ? ` · ${m.steps.join(' → ')}` : ''}
+                </em>
               )}
               {m.role === 'assistant' && !m.error && m.via === 'llm' && <em class="via">由模型判定</em>}
               {m.role === 'assistant' && !m.error && m.via === 'llm-chat' && <em class="via">由模型回答</em>}
