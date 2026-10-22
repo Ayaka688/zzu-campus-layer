@@ -110,29 +110,72 @@ npm run build                  # 产物在 dist/
 
 ## 手机上用（PWA）
 
-手机上的 Chrome 装不了扩展（Android 版至今不支持；Kiwi 已停更），所以同一套 `src/core/` 又打了一个网页版：`dist/pwa/`。加到主屏幕后它就是个 App，走的还是同样的接口。
+手机上的 Chrome 装不了扩展（Android 至今不支持；Kiwi 已停更），所以同一套 `src/core/` 又打了一个网页版：`dist/pwa/`。加到主屏幕后它就是个 App，走的还是同样的接口。
+
+### 一句话原理
+
+PWA 就是一个**静态网页**，只不过带了 `manifest` 和 service worker。浏览器允许「加到主屏幕」（变成独立图标、全屏、没地址栏），**前提是这个网页跑在 HTTPS 上**。所以要把它放到一个免费静态托管上——不需要服务器、不需要数据库、不需要域名，上传完就有地址。
+
+### 三步上手（不需要懂前端）
 
 ```powershell
-npm run build          # 产出 dist/pwa/index.html + assets（和扩展共用 chunk）
-npm run pwa:serve      # 本地预览：http://127.0.0.1:8899/pwa/index.html
-npm run pwa:shot       # 无头 Edge + 390×844 移动视口跑一遍，出 .pwa-*.png
+npm install --ignore-scripts
+npm run build
 ```
 
-怎么让它到手机上：
+跑完会有一个 `dist/` 目录，里面就是要上传的东西。
 
-1. 把 `dist/` 放到任意 **HTTPS** 静态托管（Cloudflare Pages / GitHub Pages / Netlify 都行，全免费、**不需要任何常开服务器**）。详细步骤见 [`docs/deploy-pwa.md`](docs/deploy-pwa.md)。
-2. 手机浏览器打开那个地址 → 菜单里「添加到主屏幕」。
-3. 电脑上扩展面板 → `⚙` →「生成手机同步码」→ 把那段码用微信/QQ 发给自己 → 手机上点右上角「登录态」粘进去。
+**第 1 步：把这个目录变成网址。** 三选一，都不用信用卡：
+
+| 方式 | 适合谁 | 操作 | 最后拿到的地址 |
+| --- | --- | --- | --- |
+| **GitHub Pages**（推荐，仓库已经配好） | 有这个仓库的人 | 仓库 Settings → Pages → Source 选 **GitHub Actions** → 回到 Actions 页等 `pages` 跑完 | `https://<你的用户名>.github.io/zzu-campus-layer/` |
+| **Cloudflare Pages** | 想拖拽上传 | 打开 pages.cloudflare.com → Create → Upload assets → 把 `dist/` **里面的东西**拖进去（不是 `dist` 这个文件夹本身） | `https://<项目名>.pages.dev/` |
+| **Netlify Drop** | 最省事，不用注册也行一时 | 打开 app.netlify.com/drop → 把 `dist/` 拖进去 | `https://<随机名>.netlify.app/` |
+
+> 上传时**上传 `dist/` 里的内容**，不要多包一层目录。构建产物全是相对路径，所以放在域名根或子路径都能跑，不用改配置。
+
+**第 2 步：在手机上装成 App。**
+用手机浏览器打开上面拿到的地址 → 安卓 Chrome 右上角 `⋮` →「**添加到主屏幕**」/「安装应用」；iOS Safari 是底部分享 →「添加到主屏幕」。
+装完之后点图标是独立窗口，跟原生 App 差不多。
+
+**第 3 步：把登录态搬过去。**
+手机上没有你的 CAS 登录，所以第一次要「同步」一次：
+
+1. 电脑上：扩展面板 → `⚙` →「**生成手机同步码**」→ 复制那串 `eyJ…`；
+2. 用微信/QQ 发给自己（或者任何能跨设备复制的方式）；
+3. 手机上：点右上角「**登录态**」→ 粘进去 → 保存 → 药丸变成「教务 · 30 天」就好了。
+
+之后就能问「明天有课吗」「明天南核空教室」「我还差多少学分」这些了。
+
+### 本地先看一眼（不部署）
+
+```powershell
+npm run build
+npm run pwa:serve      # 打开 http://127.0.0.1:8899/pwa/index.html
+npm run pwa:shot       # 或者：无头 Edge + 390×844 移动视口自动跑一遍，出 .pwa-*.png
+```
+
+`pwa:serve` 只是看效果用的：`localhost` 也算安全上下文，所以能装；换成局域网 IP（`http://192.168.x.x:8899`）就装不了，只能当普通网页查数据。
+
+### 常见卡点
+
+| 现象 | 原因 | 怎么办 |
+| --- | --- | --- |
+| 「添加到主屏幕」不出现 / 装完没有图标 | 不是 HTTPS，或者 manifest 没被取到 | 确认地址是 `https://`；`https://…/pwa/pwa.webmanifest` 能直接打开 |
+| 打开是白的 | `dist` 上传时多套了一层目录 | 上传 `dist/` **里面的**文件，站根应该能直接看到 `index.html` |
+| 改了配置手机上还是旧的 | service worker 有缓存 | 手机上关掉页面重开；还不行就在浏览器设置里清这个站点的站点数据 |
+| 查询报「没有访问权限01」 | 同步码过期（教务 30 天、门户 8 小时） | 回电脑重新生成一次同步码 |
+| 手机上选学校 AI 一直失败 | HTTPS 页面调 `http://chat.zzu.edu.cn` 属于混合内容，被浏览器拦 | 换第三方预设（DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter）+ 自己的 key |
+| 想发给同学用 | 这个网页不含任何账号 | 直接发地址就行，**别把同步码发给别人**（那等于发登录态） |
 
 几条实话：
 
 - **必须 HTTPS（或 localhost）**：service worker 与「添加到主屏幕」都要求安全上下文。局域网 `http://192.168.x.x:8899` 能打开页面、也能查数据（接口 CORS 都放行），但**装不了**，只能当普通网页用。
 - 构建产物**都是相对路径**（`../assets/…`、`./pwa.webmanifest`、`start_url: './index.html'`），所以放域名根或子路径都能用（GitHub Pages 项目页不需要改配置）。
-- **HTTPS 页面调不了学校的 AI**：`chat.zzu.edu.cn` 只有 http（443 上不是 TLS），HTTPS 页面去 fetch 它会被浏览器按**混合内容**拦掉（实测报 `Mixed Content: … This request has been blocked`）。所以要模型就换第三方预设（`⚙` → 服务商选 DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter + 自己的 key）；数据类功能两边都正常。
+- **HTTPS 页面调不了学校的 AI**：`chat.zzu.edu.cn` 只有 http（443 上不是 TLS），HTTPS 页面去 fetch 它会被浏览器按**混合内容**拦掉（实测报 `Mixed Content: … This request has been blocked`）。所以要模型就换第三方预设；数据类功能两边都正常。
 - 同步码是 **base64 编码，不是加密**：里面就是 `X-Id-Token`（还可能带你的模型 key），等同登录态。别贴到公开的地方；导入后可以在扩展里「清除 token」或等它自然过期（教务 30 天）。
 - 手机版**也能用模型兜底**：同步码里会带上桌面端填好的 key，导入即生效；也可以在现场手动填（登录态面板底部）。
-- 手机端没有 content script，所以 token 只能靠同步码搬；过期后要回电脑重新生成一次。
-
 ## 目录
 
 ```

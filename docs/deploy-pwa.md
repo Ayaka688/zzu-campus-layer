@@ -34,14 +34,18 @@ PWA 要能"加到主屏幕"，浏览器要求它跑在**安全上下文**（HTTP
 npx wrangler pages deploy campus-layer/dist --project-name campus
 ```
 
-### B. GitHub Pages（免费，但走子路径）
+### B. GitHub Pages（仓库已内置 workflow，推荐）
 
-1. 把 `dist/` 的内容推到仓库的 `gh-pages` 分支（或把 `dist` 设为 Pages 的发布目录）。
-2. Settings → Pages → Source 选该分支 / 目录。
-3. 地址形如 `https://<user>.github.io/<repo>/pwa/index.html`。
+本仓库带了 `.github/workflows/pages.yml`：推到 `main` 就自动 build 并把 `dist/` 发到 Pages。
+
+1. 仓库 **Settings → Pages → Source** 选 **GitHub Actions**（只需点一次）；
+2. 之后每次推 `main`，Actions 里的 `pages` 会跑完并给出地址；
+3. 地址：`https://<user>.github.io/<repo>/` —— 站根是一个跳转页，会自动进到 `<地址>/pwa/index.html`。
+
+手动方式（不想用 Actions）：把 `dist/` 的内容推到一个独立分支（如 `gh-pages`），Settings → Pages → Source 选那个分支的 `/`。
 
 产物里的路径**都是相对的**（`../assets/…`、`./pwa.webmanifest`、`../map/campus.jpg`），所以子路径能直接用。
-唯一注意：**别用仓库根当发布目录**（否则 `/pwa/` 会和源码目录混在一起），用 `dist` 或独立分支。
+唯一注意：**别用仓库根当发布目录**（否则 `/pwa/` 会和源码混在一起），用 `dist` 或独立分支。
 
 ### C. Netlify Drop / Vercel（同样免费）
 
