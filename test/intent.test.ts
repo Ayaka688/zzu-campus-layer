@@ -47,10 +47,10 @@ describe('L0 规则意图解析', () => {
     expect(parseIntent('第3-4节哪里能自习', TODAY)?.args).toMatchObject({ sections: [3, 4] });
   });
 
-  it('通知类问法', () => {
+  it('通知类问法（统一走 find_notices）', () => {
     const kw = parseIntent('查一下「AI 智能体大赛」的通知', TODAY);
-    expect(kw?.tool).toBe('search_notice');
-    expect(kw?.args).toMatchObject({ query: 'AI 智能体大赛' });
+    expect(kw?.tool).toBe('find_notices');
+    expect(kw?.args).toMatchObject({ keyword: 'AI 智能体大赛' });
   });
 
   it('成绩与考试', () => {
@@ -77,8 +77,9 @@ describe('L0 规则意图解析', () => {
 
   it('只给话题不给「通知」也能搜：「学校最近有比赛吗」', () => {
     const got = parseIntent('学校最近有比赛吗', TODAY);
-    expect(got?.tool).toBe('search_notice');
-    expect(got?.args).toMatchObject({ query: '比赛', limit: 5 });
+    expect(got?.tool).toBe('find_notices');
+    // 「最近」给 7 天窗；关键词是话题词本身（同义词扩展在 noticeRules 里做）
+    expect(got?.args).toMatchObject({ keyword: '比赛', withinDays: 7 });
   });
 
   it('覆盖不到的说法返回 null，而不是瞎猜', () => {

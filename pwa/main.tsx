@@ -18,6 +18,19 @@ import {
 } from '../src/core/storage';
 import { LlmFields } from '../src/ui/llm-fields';
 import { CampusMap, RichText, download } from '../src/ui/rich';
+import { noticesToIcs } from '../src/core/ics';
+import type { NoticeCard, TodayDigest } from '../src/core/notice';
+import { NOTICE_CATEGORIES, type NoticeCategory } from '../src/core/noticeRules';
+import {
+  DEFAULT_NOTICE_PREFS,
+  getNoticePrefs,
+  markNoticeRead,
+  setNoticePrefs,
+  type NoticePrefs,
+} from '../src/core/noticeStore';
+import { getNoticeBody, runTool } from '../src/core/tools';
+import { todayShanghai } from '../src/core/util';
+import { NoticeBoard, NoticeTodayCard } from '../src/ui/notice';
 import './style.css';
 
 interface Message {
@@ -37,6 +50,7 @@ const QUICK: Array<{ label: string; text: string }> = [
   { label: '明天有课吗', text: '明天有课吗' },
   { label: '本周课表', text: '这周课表' },
   { label: '今天的空教室', text: '今天上午的空教室' },
+  { label: '今天有什么讲座', text: '今天有什么讲座' },
   { label: '最新通知', text: '最近的通知' },
   { label: '卡里余额', text: '我卡里还有多少钱' },
   { label: '导出日历', text: '把课表导出成日历' },
@@ -58,12 +72,66 @@ function App() {
     apiKey: '',
     model: 'DeepSeek-R1',
   });
+  /** 'chat' = 问答，'notices' = 通知时间线。`#notices` 可直接深链到时间线。 */
+  const [view, setView] = useState<'chat' | 'notices'>(
+    typeof location !== 'undefined' && location.hash === '#notices' ? 'notices' : 'chat',
+  );
+  const [noticeCards, setNoticeCards] = useState<NoticeCard[]>([]);
+  const [noticeDigest, setNoticeDigest] = useState<TodayDigest | null>(null);
+  const [noticeBusy, setNoticeBusy] = useState(false);
+  const [noticeError, setNoticeError] = useState('');
+  const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
+  const [today] = useState(todayShanghai());
   const bottom = useRef<HTMLDivElement | null>(null);
   const isHttps = typeof location !== 'undefined' && location.protocol === 'https:';
 
   async function refresh() {
     setStatuses(await tokenStatuses());
     setLlm(await getLlmSettings());
+    setNoticePrefsState(await getNoticePrefs());
+  }
+
+  /** 手机端直接跑工具（没有 background），卡片管线与桌面完全同一条。 */
+  async function loadNotices(): Promise<void> {
+    if (noticeBusy) return;
+    setNoticeBusy(true);
+    setNoticeError('');
+    try {
+      const session = await loadSession();
+      if (!session.jwxtToken && !session.portalToken) {
+        setNoticeError('还没有登录态：点右上角「登录态」导入一次。');
+        return;
+      }
+      const out = await runTool('find_notices', { limit: 50 }, new CampusService(session));
+      const payload = out.data as { cards?: NoticeCard[]; digest?: TodayDigest } | undefined;
+      setNoticeCards(payload?.cards ?? []);
+      setNoticeDigest(payload?.digest ?? null);
+    } catch (e) {
+      setNoticeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setNoticeBusy(false);
+    }
+  }
+
+  async function loadNoticeDetail(card: NoticeCard): Promise<string | null> {
+    const session = await loadSession();
+    const body = await getNoticeBody(new CampusService(session), card.id);
+    return body?.text ?? null;
+  }
+
+  function saveNoticeIcs(card: NoticeCard): void {
+    download(`通知-${card.deadline ?? card.eventStart ?? today}.ics`, noticesToIcs([card]));
+  }
+
+  async function readNotice(id: string): Promise<void> {
+    setNoticePrefsState(await markNoticeRead(id));
+  }
+
+  async function toggleCategory(category: NoticeCategory): Promise<void> {
+    const current = noticePrefs.categories.length > 0 ? noticePrefs.categories : [...NOTICE_CATEGORIES];
+    const next = current.includes(category) ? current.filter((item) => item !== category) : [...current, category];
+    if (next.length === 0) return;
+    setNoticePrefsState(await setNoticePrefs({ categories: next.length === NOTICE_CATEGORIES.length ? [] : next }));
   }
 
   async function patchLlm(patch: Partial<LlmSettingsStored>) {
@@ -87,6 +155,9 @@ function App() {
   const jwxt = statuses.find((s) => s.source === 'jwxt');
   const portal = statuses.find((s) => s.source === 'portal');
   const ready = Boolean(jwxt?.valid || portal?.valid);
+  useEffect(() => {
+    if (ready) void loadNotices();
+  }, [ready]);
 
   /** 算未来 7 天的课前提醒并交给壳（没有壳时 pushReminders 返回 false，什么也不做）。 */
   async function syncReminders() {
@@ -243,9 +314,24 @@ function App() {
     <div class="app">
       <header>
         <h1>校园信息层</h1>
-        <button class="chip" onClick={() => setSheet(sheet === 'login' ? 'none' : 'login')}>
-          {ready ? `教务 ${jwxt?.remainingText ?? '—'}` : '登录态'}
-        </button>
+        <div class="chips">
+          <button
+            class={`chip${view === 'notices' ? ' on' : ''}`}
+            onClick={() => {
+              if (view === 'notices') {
+                setView('chat');
+                return;
+              }
+              setView('notices');
+              if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
+            }}
+          >
+            {view === 'notices' ? '问答' : '通知'}
+          </button>
+          <button class="chip" onClick={() => setSheet(sheet === 'login' ? 'none' : 'login')}>
+            {ready ? `教务 ${jwxt?.remainingText ?? '—'}` : '登录态'}
+          </button>
+        </div>
       </header>
 
       {sheet === 'login' && (
@@ -309,7 +395,27 @@ function App() {
         </section>
       )}
 
-      <main>
+      {view === 'notices' ? (
+        <main class="notices-main">
+          <NoticeBoard
+            cards={noticeCards}
+            digest={noticeDigest}
+            prefs={noticePrefs}
+            today={today}
+            loading={noticeBusy}
+            error={noticeError}
+            onRefresh={() => void loadNotices()}
+            onRead={(id) => void readNotice(id)}
+            onIcs={saveNoticeIcs}
+            onDetail={loadNoticeDetail}
+            onToggleCategory={(category) => void toggleCategory(category)}
+          />
+        </main>
+      ) : (
+        <main>
+          {noticeDigest && (
+            <NoticeTodayCard digest={noticeDigest} loading={noticeBusy} onOpen={() => setView('notices')} />
+          )}
         {messages.length === 0 && (
           <div class="empty">
             <p>{ready ? '问点实际的：' : '先在右上角导入一次登录态，然后：'}</p>
@@ -362,32 +468,37 @@ function App() {
         )}
         <div ref={bottom} />
       </main>
+      )}
 
-      <div class="quick">
-        {QUICK.map((q) => (
-          <button key={q.label} onClick={() => void submit(q.text)} disabled={busy}>
-            {q.label}
-          </button>
-        ))}
-      </div>
+      {view === 'chat' && (
+        <>
+          <div class="quick">
+            {QUICK.map((q) => (
+              <button key={q.label} onClick={() => void submit(q.text)} disabled={busy}>
+                {q.label}
+              </button>
+            ))}
+          </div>
 
-      <form
-        class="composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit(input);
-        }}
-      >
-        <input
-          value={input}
-          onInput={(e) => setInput((e.target as HTMLInputElement).value)}
-          placeholder="问点什么，比如「明天下午有空的教室吗」"
-          enterkeyhint="send"
-        />
-        <button type="submit" disabled={busy || !input.trim()}>
-          发送
-        </button>
-      </form>
+          <form
+            class="composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit(input);
+            }}
+          >
+            <input
+              value={input}
+              onInput={(e) => setInput((e.target as HTMLInputElement).value)}
+              placeholder="问点什么，比如「明天下午有空的教室吗」"
+              enterkeyhint="send"
+            />
+            <button type="submit" disabled={busy || !input.trim()}>
+              发送
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }

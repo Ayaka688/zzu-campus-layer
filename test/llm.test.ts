@@ -30,8 +30,12 @@ describe('stripThink', () => {
 
 describe('parseIntentsJson', () => {
   it('解析正常 JSON', () => {
-    const got = parseIntentsJson('{"tool":"search_notice","args":{"keyword":"考试"}}');
-    expect(got).toEqual({ tool: 'search_notice', args: { keyword: '考试' }, reason: 'LLM 判定' });
+    const got = parseIntentsJson('{"tool":"find_notices","args":{"keyword":"考试"}}');
+    expect(got).toEqual({ tool: 'find_notices', args: { keyword: '考试' }, reason: 'LLM 判定' });
+  });
+
+  it('模型编了不存在的工具名（老提示词里的 search_notice）→ 返回 null，不崩', () => {
+    expect(parseIntentsJson('{"tool":"search_notice","args":{"keyword":"考试"}}')).toBeNull();
   });
 
   it('容忍包裹在解释文字和 think 段里', () => {

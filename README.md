@@ -2,7 +2,7 @@
 
 郑州大学「校园信息层」—— 一个 MV3 浏览器扩展。它不爬页面：从浏览器里取到学校 CAS 下发的 `idToken`，直接调门户与教务的 JSON API，把**课表 / 空教室 / 通知 / 成绩 / 考试**变成一句话就能问的东西，再支持导出 `.ics`。
 
-规格来源见 `docs/campus-layer-handoff.md`，实测依据见 `docs/campus-site-probe.md` 与 `docs/campus-platform-architecture.md`。
+规格来源见 `docs/campus-layer-handoff.md`，实测依据见 `docs/campus-site-probe.md` 与 `docs/campus-platform-architecture.md`；通知卡片（分类/去重/时间抽取/今日口径）见 `docs/notice-hub.md`。
 
 ## 它现在能做什么
 
@@ -12,12 +12,13 @@
 | 「明天下午哪里能自习」「明天南核空教室」「主校区 200 人以上的空教室」 | 全部教室 − 当天占用，算出空闲节次；**认地点词**（南核 / 北核 / 北1 / 物理馆 / 材料馆） | 教务 `/room/place/rooms` + `/room/place/room-occupancy` |
 | 「今天下午我有课吗」「明天上午有课吗」 | 按时段收窄，只列那个时段的课（不再把整天倒出来） | 教务课表 + 本地时段表 |
 | 「查一下 XX 的通知」「学校最近有比赛吗」 | 教务通知（完整正文）+ 门户通知（摘要）；**口语话题自动扩同义词**（比赛→竞赛/大赛/挑战杯…） | 教务 `/protal-notice/get-notices` + 门户 CMS |
+| 「今天有什么讲座」「这周有比赛吗」「挑战杯什么时候截止」 | 通知**卡片**：讲座/比赛/活动/会议/教务/生活六类（教务再细分选课/考试/成绩/学籍/毕业/论文/实习…），每条带开讲时间、地点、报名截止；可按分类/时间窗筛、按发布或截止排序；可导出 `.ics`（截止提前 1 天响） | 同上两个来源，跨来源按标题去重 |
 | 「我这学期绩点多少」「高数多少分」「考试安排」 | 成绩 / 考试列表；**可按课程名过滤**，并带出服务端给的构成分（平时/期中/期末/卷面，字段因课而异） | 教务 `/grade/student/grades`、`/exam/student/exam` |
 | 「图书馆还有位置吗」「明天图书馆有空位吗」 | 各馆**实时空闲/总数**（免登录），给百分比 + 楼层明细 + 选座入口 | 图书馆空间预约 `/v4/space/pcTopFor`（`order.lib.zzu.edu.cn`，仅校内网） |
 | 「一楼大厅哪些座位空着」「帮我订 001」 | 打开过图书馆预约页（已登录）后，可读**座位级**空闲号；并**按坐标画一张座位平面图**（绿点空闲/灰点占用）；下单只在**长按确认**后才执行，且是在你自己那个标签页里点，扩展不碰密码 | 页面内 content script（`content/library.js`）+ `/v4/Space/seat` |
 | 「我想自习两小时」「找个安静地方看会儿书」 | **教室 + 图书馆合成一个入口**：按时长、步行距离（`walk.ts` 楼间表）排序，凑不够时长会分级说「这个只能坐 1 小时」 | 教务教室占用 + 图书馆余量 + 本地步行表 |
 | 「明天上午哪间教室能坐两小时」 | 每间教室给出**连续空闲窗口**：`08:00–12:00`、`现在就能坐 2 小时 40 分`，不再只说「1-4 节空」 | 教务 `/room/place/rooms` + 本地 `freeWindows` |
-| （自动，不用问） | 每天后台跑一次：**新出成绩**、**7 天内截止**的报名/申请类通知，弹系统通知；首次运行不刷历史成绩 | 教务成绩/通知 + `chrome.notifications` + `chrome.alarms` |
+| （自动，不用问） | 每天后台跑（最多 3 次）：**新出成绩**、**7 天内截止**的报名/申请类通知；**一条截止一条系统通知，点开直接定位到那张卡**；同一条截止不重复推；首次运行不刷历史成绩 | 教务成绩/通知 + `chrome.notifications` + `chrome.alarms` |
 | 「我还差多少学分毕业」「培养方案完成情况」 | 按模块列要求/已通过/在修/还差，并用进度条画出缺口 | 教务 `/plan/search/completion/info?code=01` |
 | 「打开座位预约」「报修在哪」「食堂怎么订餐」 | 从 19 项门户服务里认出你要的，直接给官方入口（面板里是可点按钮） | 本地服务目录 `src/core/catalog.ts`（来自门户 `/v2/service/serviceShowAll`） |
 | 「我卡里还有多少钱」「最近消费」 | 一卡通余额 + 最近消费/充值流水 | 门户 `/v2/personalData/getMyECard` |
@@ -32,7 +33,7 @@
 
 | 模式 | 谁在用 | 模型干什么 |
 | --- | --- | --- |
-| **Agent 循环**（新） | DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter | 模型自己决定「调哪个工具、传什么参数」→ 拿到真实数据后**自己组织自然语言回答**；一轮不够可以继续调（最多 4 步）。工具规格在 `src/core/toolspec.ts`，10 个工具全覆盖 |
+| **Agent 循环**（新） | DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter | 模型自己决定「调哪个工具、传什么参数」→ 拿到真实数据后**自己组织自然语言回答**；一轮不够可以继续调（最多 4 步）。工具规格在 `src/core/toolspec.ts`，14 个工具全覆盖 |
 | **判意图**（老） | 学校 DeepSeek（只有 `DeepSeek-R1`，Open WebUI 不暴露 tools） | 只输出 `{tool,args}`，正文由模板渲染 |
 
 Agent 模式下模型看到的是工具返回的**真实 JSON**，提示词里明确写死：只许用工具返回的内容、不许编数字/课程名/通知标题、相对日期不许自己换算（由 `applyTextHints` 按用户原话覆盖）、预约报名这类必须本人操作只能给入口且不许假装成功。所以「模型幻觉」变成「答得不好」，不会变成「编出假课表」。
@@ -192,6 +193,9 @@ npm run pwa:shot       # 或者：无头 Edge + 390×844 移动视口自动跑�
 ```
 src/core/        与运行环境无关的纯逻辑（可 node 下单测，扩展与 PWA 共用）
   types.ts       zod 模型：Course / Notice / Term / Room / FreeRoom / Grade / Exam / Card / Todo
+  notice.ts      通知卡片：分类 + 教务子类 + 时间/地点抽取 + 去重 + 排序/过滤/搜索打分 + 今日口径 + 凌晨 4 点换日
+  noticeRules.ts 通知分类词表（6 类 + 教务 10 个子类）、口语→分类、同义词扩词、截止/活动/地点抽取规则
+  noticeStore.ts 通知的个人设置：订阅分类、关注关键词、已读、提醒定位交接（经 kv.ts）
   kv.ts          存储抽象（扩展用 chrome.storage.local，网页用 localStorage）+ 同步码编码
   http.ts        统一请求头、三种信封拆包、ApiError
   jwt.ts         atob 解码 JWT、claims → 用户信息与过期时间
@@ -206,11 +210,12 @@ libtab.ts      和图书馆页面里的 content script 说话（找标签页、�
   catalog.ts     门户服务目录（19 项）+ 关键词匹配，供「一句话直达」用
   llm.ts         L1 兜底：6 家服务商预设（学校 Open WebUI / DeepSeek / 硅基流动 / 百炼 / Moonshot / OpenRouter）+ 意图判定 + 参数收敛 + `llmChatWithTools`（function calling）
   toolspec.ts    给模型看的工具规格（OpenAI tools JSON Schema，手写，描述即提示词）
-  tools.ts       10 个工具定义（schema + run）
+  tools.ts       14 个工具定义（schema + run；通知只有一个入口 find_notices）
   storage.ts     token / LLM 设置 / 状态（经 kv.ts，两种运行环境通用）
   agent.ts       ask(text) → 规则优先；能调工具时进 runAgent 循环（最多 4 步，带 history），否则走老的判意图路径
 src/ui/rich.tsx  面板与 PWA 共用的渲染件（轻量 markdown、校园地图、下载）
 src/ui/llm-fields.tsx  面板与 PWA 共用的模型设置控件（服务商 / key / 模型名）
+src/ui/notice.tsx  通知卡片（今日卡 / 分类时间线 / 搜索 / 读全文 / 加入日历 / 已读 / 已截止折叠），面板与 PWA 共用
 src/background/  service worker：消息路由、sidePanel、alarms
 sidepanel/       Preact 侧边栏
 pwa/             Preact 手机网页版（入口 index.html；manifest 与 service worker 在 public/pwa/）
@@ -281,7 +286,8 @@ npm run pwa:shot         # 真浏览器：无头 Edge + 移动视口跑 PWA（�
 - **数字编码的座位状态不敢猜**：如果服务端只给 `state: 1/0` 这类数字，扩展不会替你判定"空/占"（猜错会把占着的座位当成空的），会明说"看页面上的绿色座位"。目前实测的映射是 `1=空闲、6=使用中`（写进 `STATUS_NUM`），其它数字仍按未知处理。
 - **座位图是「按坐标自己画的」，不是官方那张**：`/v4/Space/seat` 返回的 `point_x/point_y` 会被还原成一张极简 SVG —— 绿点=空、灰点=已占，**每个空座位都标了座位号**（占用的不标，避免糊成一片），左下角写「空 N / 共 M」。标号会自动在 8 个方位里找空位放，挤不下就不标；鼠标悬停任意圆点仍能看到「001 · 空闲」。没有桌椅、门窗，状态只按 `status_name` 认。
 - **出分监控暂时没数据**：`/grade/student/grades` 本号返回 `[]`（大一当前学期还没出分），所以后台盯梢里"新成绩"这一路目前是空转，等学校出分才会真的弹通知。
-- **截止提醒只对"正文里写了日期"的通知生效**：教务通知接口的 `content` 被服务端压成了标题（`<p>标题</p>`），里面没有日期；只有当通知正文自己带 `2026-11-20` / `11 月 5 日` 这类日期时，才能算出"还剩几天"。
+- **通知卡片上的时间/地点是抽出来的，不是接口给的**：两边都没有「活动时间 / 报名截止 / 地点」字段，只能按句子从标题+正文里抽（截止句取最晚、活动句取最早，抽不到就不显示）。门户那条因为服务端只给 200 字，经常抽不到；同一条教务也发了的话，去重时会用全文补上。
+- **截止提醒只对「抽得到日期」的通知生效**：正文里没有 `2026-11-20` / `11 月 5 日` 这类明确日期时就算不出「还剩几天」，卡片上也不会显示截止——宁可少一行，也不猜。
 - **权限**：只申请 15 个域（8 个学校域 + `http://chat.zzu.edu.cn/*` + `http://order.lib.zzu.edu.cn/*` + 5 家模型服务商），不申请 `<all_urls>`；没有自定义 `baseUrl`，所以不需要 `optional_host_permissions` 去弹授权。API 权限是 `storage, alarms, sidePanel, scripting, notifications`——`scripting` 只用来读你自己那个图书馆标签页的 `sessionStorage.token`，`notifications` 只用来弹每日盯梢。
 - **一卡通 / 待办**：接口通，本号余额 `¥0`、待办全 0（确实没消费、没待办）；`message-service` 的未读数接口回 500，未读消息暂不做。
 - **token 存储**：只在 `chrome.storage.local`，不出本机。`X-Id-Token` 等同于登录态，别导出这个扩展的存储。

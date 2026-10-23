@@ -6,6 +6,7 @@ import { extractNeedMinutes } from './study';
 import type { ToolName } from './tools';
 import { matchServices } from './catalog';
 import { resolvePlace } from './place';
+import { CATEGORY_LABEL, categoryFromText } from './noticeRules';
 import { addDays, todayShanghai, weekdayOf } from './util';
 
 export interface Intent {
@@ -332,15 +333,51 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     return { tool: 'get_todos', args: {}, reason: '关键词：待办' };
   }
 
+  // ---- 通知卡片（分类时间线）----
+  // 放在老的关键词搜索之前：这类问法要的是「按分类+时间窗筛出来的卡片」，
+  // 而不是「标题里包含某个词」。但也不能抢得太多：「学校最近有比赛吗」仍走老路径
+  // （它没说要「今天/本周」，老路径的同义词扩展已经够了）。
+  {
+    const category = categoryFromText(t);
+    const wantsList = /有什么|有哪些|哪些|几场|几个|看看|推荐/.test(t);
+    const onDay = /(今天|今日|明天|本周|这周|下周|本周末).{0,8}(?:讲座|比赛|竞赛|活动|会议)/.test(t);
+    if (category && !/截止|ddl|什么时候|几号|何时/.test(t) && (wantsList || onDay)) {
+      // 时间窗按问法给：今天只看今天，明天放宽到 1 天，本周/最近 7 天
+      const withinDays = /今天|今日/.test(t) ? 0 : /明天|明日/.test(t) ? 1 : 7;
+      return {
+        tool: 'find_notices',
+        args: { category, withinDays },
+        reason: `关键词：通知分类（${CATEGORY_LABEL[category]}）`,
+      };
+    }
+  }
+
+  // 「奖学金什么时候截止」「挑战杯报名截止了吗」→ 按截止时间排，只看最近两周的窗口
+  if (/截止|ddl|到期|还来得及|几号截止|报名到几号/.test(t)) {
+    const keyword = extractKeyword(t) ?? NOTICE_TOPICS.find((w) => t.includes(w));
+    return {
+      tool: 'find_notices',
+      args: { withinDays: 14, sort: 'deadline', ...(keyword ? { keyword } : {}) },
+      reason: '关键词：截止时间',
+    };
+  }
+
   if (/通知|公告|新闻|消息|比赛|竞赛|大赛|挑战杯|评奖|评优|重修|选课|讲座|论坛|招聘|实习/.test(t)) {
     // 用户不一定说「查 XX 的通知」。像「学校最近有比赛吗」，关键词就是那个话题词；
-    // 拿到话题词后由 tools.expandQuery 再扩成同义词组，避免「比赛」搜不到「竞赛」。
+    // 拿到话题词后由 tools 的 noticeRules 扩成同义词组，避免「比赛」搜不到「竞赛」。
+    // 老路径 search_notice 已经并进 find_notices，这里只决定「关键词 + 时间窗」。
     const keyword = extractKeyword(t) ?? NOTICE_TOPICS.find((w) => t.includes(w));
-    const limit = /最新|最近/.test(t) ? 5 : undefined;
+    const withinDays = /今天|今日/.test(t)
+      ? 0
+      : /明天|明日/.test(t)
+        ? 1
+        : /本周|这周|下周|最近|最新/.test(t)
+          ? 7
+          : undefined;
     const args: Record<string, unknown> = {};
-    if (keyword) args.query = keyword;
-    if (limit) args.limit = limit;
-    return { tool: 'search_notice', args, reason: '关键词：通知/公告' };
+    if (keyword) args.keyword = keyword;
+    if (withinDays !== undefined) args.withinDays = withinDays;
+    return { tool: 'find_notices', args, reason: '关键词：通知/公告' };
   }
 
   if (/课表|有课|上课|课程|几节课|[周星期礼拜][一二三四五六日天1-7].*课|明天.*课|今天.*课/.test(t)) {

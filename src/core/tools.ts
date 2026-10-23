@@ -5,9 +5,15 @@ import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
 import { planStudy, renderStudyPlan } from './study';
 import { seatMapDataUri } from './library';
-import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderNotices, renderPlanProgress, renderSeatMap, renderTodos } from './render';
+import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, todayShanghai, weekdayOf } from './util';
+import { buildCards, cardId, cardLine, filterCards, renderCards, sortCards, toPlainText, todayDigest } from './notice';
+import { CATEGORY_LABEL, expandNoticeQuery as expandQuery } from './noticeRules';
+
+// 同义词扩词表现在在 noticeRules.ts（老搜索与通知卡片共用一份）。
+// 这里保留原来的导出名，免得调用方和测试跟着改。
+export { expandQuery };
 
 export interface ToolResult {
   /** 给用户看的正文 */
@@ -149,84 +155,111 @@ export const findFreeRoom: ToolDefinition<{
 };
 
 /**
- * 关键词 → 同义词组。学生说「有比赛吗」时，通知标题里写的是「创新创业大赛」「学科竞赛」，
- * 直接 includes 匹配必然 0 条（这是实测踩过的坑）。
+ * 通知卡片：结构化（分类 + 时间 + 地点 + 截止），不是关键词列表。
+ *
+ * 这是**唯一**的通知入口：老路径 `search_notice`（纯关键词 contains、命不中就回「最近的通知」）
+ * 已经并进来——它和新路径共用 noticeRules 的同义词表，留着两套只会让「最近有比赛吗」和
+ * 「最近有什么比赛」给出两种形态的答案。现在关键词走 `keyword`，时间窗走 `withinDays`。
  */
-const SYNONYMS: Array<{ test: RegExp; expand: string[] }> = [
-  { test: /比赛|竞赛|赛事|大赛/, expand: ['比赛', '竞赛', '大赛', '挑战杯', '创新创业', '选拔', '赛区', '选拔赛'] },
-  { test: /奖助|奖学金|助学金|评奖|评优/, expand: ['奖学金', '助学金', '评奖', '评优', '资助', '困难'] },
-  { test: /实习|就业|招聘|求职/, expand: ['实习', '就业', '招聘', '双选', '宣讲'] },
-  { test: /重修|补考|挂科|清考/, expand: ['重修', '补考', '重考'] },
-  { test: /选课|退课|选课/, expand: ['选课', '退课', '选课通知'] },
-  { test: /四六级|英语四六级|CET/i, expand: ['四六级', 'CET', '英语'] },
-  { test: /党课|党员|团|团员/, expand: ['党课', '党员', '团员', '团课'] },
-  { test: /讲座|报告|论坛|学术/, expand: ['讲座', '报告', '论坛', '学术'] },
-  { test: /考试|考场|监考/, expand: ['考试', '考场', '监考'] },
-  { test: /放假|假期|开学|报到/, expand: ['放假', '假期', '开学', '报到'] },
-];
-
-export function expandQuery(query: string | undefined): string[] {
-  const q = (query ?? '').trim();
-  if (!q) return [];
-  const terms = new Set<string>([q]);
-  // 中文没有空格分词，整句只取 2-6 字的片段做补充词，避免把「学校最近有比赛吗」整个当关键词
-  const cleaned = q.replace(/[有吗呢啊？?。，,、\s]|学校|最近|这个|那个|上的|里的/g, '');
-  if (cleaned.length >= 2) terms.add(cleaned);
-  for (const rule of SYNONYMS) {
-    if (rule.test.test(q)) for (const w of rule.expand) terms.add(w);
-  }
-  return [...terms];
-}
-
-export const searchNotice: ToolDefinition<{ query?: string; keyword?: string; days?: number; limit?: number }> = {
-  name: 'search_notice',
+export const findNotices: ToolDefinition<{
+  category?: 'lecture' | 'competition' | 'activity' | 'meeting' | 'academic' | 'life';
+  topic?: string;
+  keyword?: string;
+  withinDays?: number;
+  sort?: 'published' | 'deadline';
+  limit?: number;
+}> = {
+  name: 'find_notices',
   description:
-    '查通知公告（教务处全文 + 门户摘要）。按关键词做同义词扩展匹配，可按最近 N 天过滤，结果按发布时间倒序。',
+    '查通知卡片（讲座/比赛/活动/会议/教务/生活 六类，教务还会细分到选课/考试/成绩/学籍/毕业/实习等子类）。' +
+    '每条给出：标题、分类、活动时间、地点、报名截止。可按分类/子类筛、按最近 N 天或 N 天内截止筛、按发布时间或截止时间排序。' +
+    '用户问「最近的通知」「今天有什么讲座」「最近有比赛吗」「×× 什么时候截止」都用它。',
   schema: z.object({
-    /** 新的口语参数：用户原话里的关键词 */
-    query: z.string().min(1).optional(),
-    /** 老参数，规则层还在用 */
+    category: z.enum(['lecture', 'competition', 'activity', 'meeting', 'academic', 'life']).optional(),
+    topic: z.string().min(1).optional(),
     keyword: z.string().min(1).optional(),
-    days: z.number().int().min(1).max(365).optional(),
+    withinDays: z.number().int().min(0).max(365).optional(),
+    sort: z.enum(['published', 'deadline']).optional(),
     limit: z.number().int().min(1).max(50).optional(),
   }),
   async run(args, svc) {
-    const raw = args.query ?? args.keyword ?? '';
-    const terms = expandQuery(raw);
-    const limit = args.limit ?? 10;
-    // 关键词命中经常只有个位数，先多抓一些再过滤（服务端 limit 是抓取量，不是结果量）
-    const pool = await svc.notices({ limit: terms.length ? 40 : limit });
-    let list = pool;
-    if (args.days) {
-      const cutoff = Date.now() - args.days * 86_400_000;
-      list = list.filter((n) => {
-        const t = n.publishedAt ? Date.parse(n.publishedAt.replace(/-/g, '/')) : NaN;
-        return Number.isFinite(t) ? t >= cutoff : true;
-      });
+    const today = todayShanghai();
+    // 多抓一些：分类/时间窗都在客户端做，服务端 limit 只决定「抓多少回来」。
+    // 注意 services.notices 已按发布时间倒序再截断，所以 80 条是「最新的 80 条」。
+    const notices = await svc.notices({ limit: 80 });
+    const cards = buildCards(notices, { today });
+    const picked = filterCards(cards, {
+      ...(args.category ? { categories: [args.category] } : {}),
+      ...(args.keyword ? { keyword: args.keyword } : {}),
+      ...(args.withinDays !== undefined ? { withinDays: args.withinDays } : {}),
+      today,
+    });
+    // 子类（教务细分：选课/考试/成绩/学籍/毕业/实习…）按标签或标题匹配
+    const scoped = args.topic
+      ? picked.filter((card) => (card.topicLabel ?? '').includes(args.topic!) || card.title.includes(args.topic!))
+      : picked;
+    const sorted = sortCards(scoped, args.sort ?? 'published');
+    const shown = sorted.slice(0, args.limit ?? 12);
+    const digest = todayDigest(cards, today);
+
+    if (shown.length > 0) {
+      return {
+        text: renderCards(shown, { today, ...(args.keyword ? { keyword: args.keyword } : {}) }),
+        data: {
+          count: sorted.length,
+          today,
+          ...(args.category ? { category: args.category, categoryLabel: CATEGORY_LABEL[args.category] } : {}),
+          ...(args.topic ? { topic: args.topic } : {}),
+          ...(args.withinDays !== undefined ? { withinDays: args.withinDays } : {}),
+          cards: shown,
+          digest,
+        },
+      };
     }
-    if (terms.length) {
-      const hit = list.filter((n) => {
-        const hay = `${n.title} ${n.summary}`;
-        return terms.some((t) => hay.includes(t));
-      });
-      if (hit.length) {
-        return {
-          text: renderNotices(hit.slice(0, limit), raw),
-          data: { count: hit.length, terms, notices: hit.slice(0, limit) },
-        };
-      }
-      // 没命中：给出「最近的通知」并说明没匹配上，别只回一句「没有」
-      const recent = list.slice(0, Math.min(5, limit));
-      const lines = [`没有匹配「${raw}」的通知（试过：${terms.slice(0, 6).join('、')}）。`, ''];
-      if (recent.length) {
-        lines.push('最近的通知是这些，看有没有你要的：');
-        for (const n of recent) lines.push(`- ${n.publishedAt?.slice(0, 10) ?? ''} ${n.title}`);
-      }
-      return { text: lines.join('\n'), data: { count: 0, terms, notices: recent } };
+
+    // 没命中不要只回一句「没有」：说清楚筛了什么，并把「今天的状况 + 最近几条」摆出来
+    const scope = [
+      args.category ? CATEGORY_LABEL[args.category] : '',
+      args.topic ?? '',
+      args.withinDays !== undefined ? `最近 ${args.withinDays} 天` : '',
+      args.keyword ? `关键词「${args.keyword}」` : '',
+    ].filter(Boolean);
+    const recent = sortCards(cards, 'published').slice(0, 3);
+    const lines = [`没有${scope.length ? scope.join(' · ') + ' 的' : ''}通知。`, '', `今天：${digest.line}。`];
+    if (recent.length > 0) {
+      lines.push('', '最近的通知：');
+      for (const card of recent) lines.push(cardLine(card, today));
     }
-    return { text: renderNotices(list.slice(0, limit)), data: { count: list.length, notices: list.slice(0, limit) } };
+    return {
+      text: lines.join('\n'),
+      data: { count: 0, today, cards: [], digest },
+    };
   },
 };
+
+export interface NoticeBody {
+  id: string;
+  title: string;
+  /** 纯文本正文（教务有完整 HTML，转文本后给 UI，接口 HTML 不进 DOM） */
+  text: string;
+  url?: string;
+}
+
+/**
+ * 单条通知的正文。
+ * 卡片里只有 160 字摘要，想读全文时按 id 回查一次（`svc.notices` 有缓存，几乎不额外打请求）。
+ * 参数收成 `Pick<CampusService,'notices'>`，单测里给个假对象就能测，不用真 token。
+ */
+export async function getNoticeBody(
+  svc: Pick<CampusService, 'notices'>,
+  id: string,
+): Promise<NoticeBody | null> {
+  const notices = await svc.notices({ limit: 80 });
+  const hit = notices.find((notice) => cardId(notice) === id);
+  if (!hit) return null;
+  const text = hit.contentHtml ? toPlainText(hit.contentHtml) : hit.summary;
+  return { id, title: hit.title, text: text.slice(0, 6000), ...(hit.url ? { url: hit.url } : {}) };
+}
 
 export const getGrades: ToolDefinition<{ course?: string }> = {
   name: 'get_grades',
@@ -489,7 +522,7 @@ export const TOOLS = {
   get_schedule: getSchedule,
   find_free_room: findFreeRoom,
   find_study_spot: studySpotTool,
-  search_notice: searchNotice,
+  find_notices: findNotices,
   get_grades: getGrades,
   get_exams: getExams,
   get_plan_progress: getPlanProgress,

@@ -160,7 +160,11 @@ export class CampusService {
       ? collected.filter((n) => n.title.includes(keyword) || n.summary.includes(keyword))
       : collected;
 
-    return filtered.slice(0, limit);
+    // 先按发布时间倒序再截断。接口给的顺序是「教务在前、门户在后」，直接 slice 会在教务通知
+    // 多的时候把门户那 30 条整段截掉（实测会丢整页门户通知，读全文也找不到）。
+    return [...filtered]
+      .sort((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? '') || a.title.localeCompare(b.title))
+      .slice(0, limit);
   }
 
   async grades(): Promise<Grade[]> {

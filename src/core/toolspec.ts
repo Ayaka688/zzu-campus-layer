@@ -128,19 +128,41 @@ export const TOOL_SPECS: ToolSpec[] = [
   {
     type: 'function',
     function: {
-      name: 'search_notice',
+      name: 'find_notices',
       description:
-        '搜学校通知公告（教务处 + 门户资讯）。用户问「最近有什么通知」「有比赛吗」「关于XX的公告」时用。' +
-        '会做同义词扩展（比赛→竞赛/大赛/挑战杯/创新创业/选拔/报名）。',
+        '查通知卡片（唯一通知入口）：讲座 / 比赛 / 活动 / 会议 / 教务 / 生活 六类，教务还会细到选课/考试/成绩/学籍/毕业/实习等子类。' +
+        '每条给标题、分类、活动时间、地点、报名截止。用户问「最近的通知」「今天有什么讲座」「最近有比赛吗」' +
+        '「这周有什么活动」「×× 什么时候截止」都用它。没有截止或地点就是没抽到，别自己补。',
       parameters: {
         type: 'object',
         properties: {
-          query: {
+          category: {
             type: 'string',
-            description: '用户说的话里的关键词，原词即可（「比赛」「重修」「选课」），不要自己造句。留空=看最近的通知。',
+            enum: ['lecture', 'competition', 'activity', 'meeting', 'academic', 'life'],
+            description:
+              '只要某一类：lecture=讲座/报告，competition=比赛/竞赛，activity=活动，meeting=会议，academic=教务，life=生活。不填=全部',
           },
-          days: { type: 'integer', minimum: 1, maximum: 365, description: '只看最近 N 天发布的' },
-          limit: { type: 'integer', minimum: 1, maximum: 50, description: '最多几条，默认 10' },
+          topic: {
+            type: 'string',
+            description:
+              '子类，主要给教务用：选课 / 考试 / 成绩 / 学籍 / 毕业 / 实习实践 / 论文 / 培养方案 / 教学 / 四六级 / 评教。不填=不按子类筛',
+          },
+          keyword: {
+            type: 'string',
+            description: '关键词，原词即可（「挑战杯」「选课」「大模型」）。会做同义词扩展，不要自己造句。',
+          },
+          withinDays: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 365,
+            description: '时间窗：最近 N 天发布的，或今天起 N 天内截止/开讲的。0=只看今天；不填=不限时间。',
+          },
+          sort: {
+            type: 'string',
+            enum: ['published', 'deadline'],
+            description: 'published=按发布时间倒序（默认）；deadline=按截止日临近排，问「什么时候截止」时用。',
+          },
+          limit: { type: 'integer', minimum: 1, maximum: 50, description: '最多几条，默认 12' },
         },
         additionalProperties: false,
       },

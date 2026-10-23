@@ -175,7 +175,9 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 ## 7. 鉴权（v0.2 主路径）
 
 1. content script 在 `uniapp.s.zzu.edu.cn` 读 cookie `userToken`（门户，8h）。
-2. content script 在 `jwxt.zzu.edu.cn` 读 `localStorage['X-Id-Token'|'idToken'|'token_key']` 或 cookie `X-Id-Token`（教务，30d）。
+2. content script 在 `jwxt.zzu.edu.cn` 按 **URL（`?idToken=`）→ localStorage → sessionStorage → cookie** 依次找教务的 `idToken`（30d）。
+   CAS 回调把 JWT 放在 URL 里，前端落盘时又可能包成 uni-app 的 `{"type":"string","data":"…"}`，所以采集器先解包装再判「是不是三段 JWT」，键名变了还有全量扫描兜底（见 `public/content/jwxt.js`，测试 `test/jwxt-collector.test.ts`）。
+   教务有时被门户用 iframe 嵌着，manifest 对这条脚本开了 `all_frames`。页面控制台可跑 `__zzuTokenProbe()` 自查。
 3. `chrome.runtime.sendMessage({type:'token', token, source})` → 存 `chrome.storage.local`。
 4. SW 发请求时带 `X-Id-Token`、`X-Terminal-Info: h5`、`X-Device-Info: PCWin32NT`，`credentials:'omit'`（不需要 cookie）。
 5. 过期判定 = JWT `exp` 到期 **或** 业务码 `code:-1` / `没有访问权限` → 面板标红，提示重新登录。
