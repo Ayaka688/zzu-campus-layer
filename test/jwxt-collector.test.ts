@@ -10,7 +10,10 @@ import vm from 'node:vm';
 const CODE = readFileSync(fileURLToPath(new URL('../public/content/jwxt.js', import.meta.url)), 'utf8');
 
 /** 形状合法的 JWT（不参与任何网络请求，只看能不能被采集器认出来） */
-const JWT = 'eyJhbGciOiJSUzUxMiJ9.eyJleHAiOjE4OTM0NTYwMDB9.c2lnbmF0dXJl';
+const JWT = 'eyJhbGciOiJSUzUxMiJ9.eyJleHAiOjE4OTM0NTYwMDAsImlzcyI6ImNhcy5zLnp6dS5lZHUuY24ifQ.c2lnbmF0dXJl';
+
+/** 形状合法但不是 CAS 签的票（payload 里 iss 是别的域）——开了 all_frames 之后必须被丢掉 */
+const FOREIGN = 'eyJhbGciOiJSUzUxMiJ9.eyJleHAiOjE4OTM0NTYwMDAsImlzcyI6ImV2aWwuZXhhbXBsZS5jb20ifQ.c2lnbmF0dXJl';
 
 interface Sent {
   type?: string;
@@ -45,6 +48,9 @@ function run(env: {
     localStorage: makeStore(env.local ?? {}),
     sessionStorage: makeStore(env.session ?? {}),
     document: { cookie: env.cookie ?? '' },
+    // 与浏览器对齐：采集器会解析 JWT payload（iss 校验），sandbox 里也要有 atob/escape
+    atob: (s: string) => Buffer.from(s, 'base64').toString('binary'),
+    escape: (s: string) => encodeURIComponent(s).replace(/%(?![0-9A-F]{2})/g, '%25'),
     chrome: {
       runtime: {
         sendMessage: (message: Sent) => {
@@ -113,5 +119,30 @@ describe('教务采集器：token 从哪来都能认出来', () => {
   it('探针能说清楚从哪找到的（排查用）', () => {
     const { probe } = run({ local: { token_key: JSON.stringify({ type: 'string', data: JWT }) } });
     expect(probe()).toMatchObject({ found: true, from: 'localStorage' });
+  });
+});
+
+
+describe('只认 CAS 签发的票（all_frames 防串号）', () => {
+  it('iss 不是 cas.s.zzu.edu.cn 的 JWT 会被忽略', () => {
+    const { sent } = run({
+      local: {
+        idToken: JSON.stringify({ type: 'string', data: FOREIGN }),
+        token_key: FOREIGN,
+      },
+      cookie: 'X-Id-Token=' + FOREIGN,
+    });
+    expect(sent.filter((s) => s.type === 'token')).toHaveLength(0);
+  });
+
+  it('扫描到的第一张票是外来票时，宁可不发，也不把别人的会话当登录态', () => {
+    const { sent } = run({
+      local: {
+        idToken: JSON.stringify({ type: 'string', data: FOREIGN }),
+        'X-Id-Token': JWT,
+      },
+    });
+    const tokens = sent.filter((s) => s.type === 'token');
+    expect(tokens).toHaveLength(0);
   });
 });

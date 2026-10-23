@@ -102,10 +102,30 @@
     return null;
   }
 
+  /** 只认 CAS 签发的票：开了 all_frames，任何 iframe 里的 JWT 都可能是别人的会话。 */
+  function fromCas(token) {
+    try {
+      const body = token.split('.')[1];
+      if (!body) return false;
+      const b64 = body.replace(/-/g, '+').replace(/_/g, '/');
+      const pad = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+      const json = JSON.parse(decodeURIComponent(escape(atob(pad))));
+      return Boolean(json && json.iss === 'cas.s.zzu.edu.cn');
+    } catch {
+      return false;
+    }
+  }
+
+  /** sniff() 加 iss 校验：其它来源的票一律不认。 */
+  function trusted() {
+    const hit = sniff();
+    return hit && fromCas(hit.token) ? hit : null;
+  }
+
   let lastFrom = null;
 
   function push(reason) {
-    const hit = sniff();
+    const hit = trusted();
     if (!hit) return;
     lastFrom = hit.from;
     try {
@@ -126,14 +146,14 @@
 
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg && msg.type === 'ping') {
-      const hit = sniff();
+      const hit = trusted();
       reply({ ok: true, source: SOURCE, hasToken: Boolean(hit), from: hit ? hit.from : null });
     }
   });
 
   // 排查用：在教务页面控制台跑 __zzuTokenProbe()，能看到找到没、从哪找到、候选键名
   window.__zzuTokenProbe = () => {
-    const hit = sniff();
+    const hit = trusted();
     let keys = [];
     try {
       keys = Object.keys(localStorage).filter((k) => /token|auth|jwt|user/i.test(k));

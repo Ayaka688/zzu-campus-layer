@@ -311,7 +311,7 @@ async function main() {
     `(async () => {
       const cases = [
         ['find_free_room', { campus: '主校区', minSeats: 100, limit: 3 }],
-        ['search_notice', { limit: 2 }],
+        ['find_notices', { limit: 2 }],
         ['get_grades', {}],
         ['get_exams', {}],
         ['get_plan_progress', {}],
