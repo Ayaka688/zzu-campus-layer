@@ -129,6 +129,34 @@ function App() {
   }
 
   /** 从剪贴板取一次：能认出来就直接导入，省掉「再点保存」那一下。 */
+  /**
+   * 给原生壳（Android WebView）用一个入口：壳里登录成功后直接调
+   *   window.__campusImport("<idToken 或完整网址>")
+   * 就完成导入，用户不需要复制任何东西。
+   */
+  useEffect(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__campusImport = async (raw: string): Promise<string> => {
+      try {
+        const bundle = parseImportLink(String(raw ?? ''));
+        const next = await importTokenBundle(bundle);
+        setStatuses(next);
+        setLlm(await getLlmSettings());
+        setSheet('none');
+        setNote('登录态已导入');
+        setTimeout(() => setNote(''), 2500);
+        return 'ok';
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setNote(msg);
+        return msg;
+      }
+    };
+    return () => {
+      delete w.__campusImport;
+    };
+  }, []);
+
   async function readClip(): Promise<void> {
     let text = '';
     try {
