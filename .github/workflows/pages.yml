@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # 需要发 Release（挂滚动 tag dist-latest 的构建产物）
   pages: write
   id-token: write
 
@@ -55,6 +55,23 @@ jobs:
           name: campus-layer-dist
           path: dist
           retention-days: 30
+
+      # artifact 下载要登录 GitHub；再往滚动 Release 挂一份，任何人都能直接下
+      - name: 打包 dist
+        run: cd dist && zip -qr ../campus-layer-dist.zip . && cd ..
+
+      - name: 发布到 Release（滚动 tag：dist-latest）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view dist-latest >/dev/null 2>&1 || \
+            gh release create dist-latest \
+              --title "最新构建产物（自动生成）" \
+              --notes "解压后就是 dist/ 的内容：可以直接在 chrome://extensions 「加载解压缩的扩展」，也可以作为 PWA 静态站点上传托管。
+
+          每次推 main 会被覆盖更新。" \
+              --target main
+          gh release upload dist-latest campus-layer-dist.zip --clobber
 
   deploy:
     needs: build
