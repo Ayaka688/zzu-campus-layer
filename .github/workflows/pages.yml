@@ -48,6 +48,14 @@ jobs:
         with:
           path: dist
 
+      # 另外把构建产物作为压缩包挂到这次 run 上：
+      # 没装 Node 的人可以直接下载解压，得到的就是可以「加载解压缩的扩展」的 dist 内容
+      - uses: actions/upload-artifact@v4
+        with:
+          name: campus-layer-dist
+          path: dist
+          retention-days: 30
+
   deploy:
     needs: build
     runs-on: ubuntu-latest

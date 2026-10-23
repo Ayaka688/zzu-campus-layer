@@ -2,7 +2,10 @@
 
 > 目标：手机上有一个图标，点开就能一句话查课表 / 空教室 / 通知 / 学分 / 一卡通，**不需要任何常开服务器**。
 >
-> 前置：`cd campus-layer && npm install --ignore-scripts && npm run build`，产物在 `campus-layer/dist/`。
+> **前置：先拿到 `dist/`。** 它**不在仓库里**（构建产物不入库，避免每次提交一堆带 hash 的 chunk）。两种拿法：
+>
+> - **装了 Node**：`cd campus-layer && npm install --ignore-scripts && npm run build`，产物在 `campus-layer/dist/`；
+> - **没装 Node**：打开 [pages workflow 的运行记录](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/pages.yml)，选最新一次，页面底部 **Artifacts** → 下载 `campus-layer-dist`，解压出来的内容等同于 `dist/`。
 
 ## 为什么是静态托管
 
