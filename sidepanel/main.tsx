@@ -299,6 +299,12 @@ function App() {
             <div class={m.error ? 'bubble error' : 'bubble'}>
               {m.role === 'assistant' && !m.error ? <RichText text={m.text} /> : <pre>{m.text}</pre>}
               {m.role === 'assistant' && !m.error && m.tool === 'get_schedule' && <CampusMap />}
+              {m.role === 'assistant' && !m.error && typeof m.data?.image === 'string' && (
+                <figure class="seatmap">
+                  <img src={String(m.data.image)} alt={String(m.data.imageAlt ?? '座位平面图')} />
+                  <figcaption>绿点是空的 · 灰点已占（按页面坐标还原，不是官方图）</figcaption>
+                </figure>
+              )}
               {m.role === 'assistant' && !m.error && typeof m.data?.action === 'object' && m.data.action && (
                 <HoldButton
                   label={String((m.data.action as { label?: string }).label ?? '长按确认')}

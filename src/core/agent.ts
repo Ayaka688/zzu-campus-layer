@@ -52,9 +52,21 @@ export interface AskOptions {
 const MAX_HISTORY = 8;
 const MAX_TOOL_PAYLOAD = 3000;
 
+/** 只给界面用的重字段：模型看了没用，还会挤掉上下文（座位图 data URI 一个人就 20KB） */
+const UI_ONLY_KEYS = ['image', 'seats', 'ics', 'raw', 'svg'];
+
 /** 工具返回给模型的内容：正文 + 精简后的结构化数据。 */
 function toolMessage(text: string, data: Record<string, unknown> | undefined): string {
-  const payload = JSON.stringify({ text, ...(data ? { data } : {}) });
+  let slim: Record<string, unknown> | undefined;
+  if (data) {
+    slim = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (UI_ONLY_KEYS.includes(k)) continue;
+      slim[k] = v;
+    }
+    if (Array.isArray(slim.seats)) delete slim.seats;
+  }
+  const payload = JSON.stringify({ text, ...(slim && Object.keys(slim).length ? { data: slim } : {}) });
   return payload.length > MAX_TOOL_PAYLOAD ? `${payload.slice(0, MAX_TOOL_PAYLOAD)}…(截断)` : payload;
 }
 

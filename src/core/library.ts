@@ -124,6 +124,9 @@ export interface LibSeat {
   /** 原始状态字符串，服务端给什么就是什么 */
   status: string;
   free: boolean;
+  /** 页面平面图上的坐标（真实接口给 `point_x`/`point_y`），拿不到就不画图 */
+  x?: number;
+  y?: number;
 }
 
 export interface LibSeatMap {
@@ -141,6 +144,16 @@ export interface LibSeatMap {
 const FREE_RE = /^(free|empty|available|idle)$|空闲|可用|可选/i;
 const USED_RE = /used|occupied|busy|booked|使用|占用|已约|不可选/i;
 const NUMERIC_STATUS_RE = /^-?\d+$/;
+
+/** 宽松取数：数字或数字字符串都收，其它（null/空串/NaN）返回 undefined */
+const numOr = (v: unknown): number | undefined => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+};
 
 const seatNo = (o: Record<string, unknown>): string => {
   for (const k of ['no', 'name', 'seat_no', 'seatNo', 'num', 'number', 'code', 'title']) {
@@ -212,7 +225,9 @@ export function parseSeatMap(raw: unknown): LibSeatMap {
       const byName = status !== '' && FREE_RE.test(status) && !USED_RE.test(status);
       const byNum = STATUS_NUM[status]?.free ?? false;
       const free = status !== '' ? byName || byNum : false;
-      out.seats.push({ no, status, free });
+      const x = numOr(obj.point_x ?? obj.x ?? obj.left);
+      const y = numOr(obj.point_y ?? obj.y ?? obj.top);
+      out.seats.push({ no, status, free, ...(x !== undefined ? { x } : {}), ...(y !== undefined ? { y } : {}) });
       return;
     }
 
@@ -223,6 +238,56 @@ export function parseSeatMap(raw: unknown): LibSeatMap {
   out.seats.sort((a, b) => a.no.localeCompare(b.no, 'zh'));
   if (out.free === undefined && out.seats.length) out.free = out.seats.filter((s) => s.free).length;
   return out;
+}
+
+/**
+ * 把座位坐标画成 SVG 平面图（真实接口给 point_x/point_y）。
+ * 拿不到坐标就不画——宁可说「看不到图」，也不画一张假图。
+ */
+export function seatMapSvg(m: LibSeatMap, opts: { width?: number } = {}): string | undefined {
+  const pts = m.seats.filter((s) => typeof s.x === 'number' && typeof s.y === 'number');
+  if (pts.length < 4) return undefined;
+
+  const W = opts.width ?? 720;
+  const PAD = 16;
+  const xs = pts.map((s) => s.x as number);
+  const ys = pts.map((s) => s.y as number);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(maxX - minX, 1);
+  const spanY = Math.max(maxY - minY, 1);
+  const scale = (W - PAD * 2) / spanX;
+  const H = Math.min(Math.round(spanY * scale + PAD * 2), 560);
+  const r = Math.max(3, Math.min(7, Math.round(scale * 6)));
+  const freeCount = pts.filter((s) => s.free).length;
+
+  const dots = pts
+    .map((s) => {
+      const cx = PAD + ((s.x as number) - minX) * scale;
+      const cy = PAD + ((s.y as number) - minY) * scale;
+      const fill = s.free ? '#3fb950' : '#3a3f47';
+      return '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r + '" fill="' + fill + '"/>';
+    })
+    .join('');
+
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">',
+    '<rect width="100%" height="100%" fill="#12141a"/>',
+    dots,
+    '<text x="' + PAD + '" y="' + (H - 6) + '" fill="#8b949e" font-size="12" font-family="system-ui,sans-serif">' +
+      '空 ' + freeCount + ' / 共 ' + pts.length +
+      '</text>',
+    '</svg>',
+  ].join('');
+}
+
+/** 给 <img src> 用的 data URI（不依赖 btoa 的 latin1 限制） */
+export function seatMapDataUri(m: LibSeatMap, opts: { width?: number } = {}): string | undefined {
+  const svg = seatMapSvg(m, opts);
+  if (!svg) return undefined;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
 export function renderSeatMap(m: LibSeatMap, opts: { limit?: number } = {}): string {

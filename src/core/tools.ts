@@ -4,6 +4,7 @@ import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
 import { planStudy, renderStudyPlan } from './study';
+import { seatMapDataUri } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderNotices, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, todayShanghai, weekdayOf } from './util';
@@ -414,6 +415,7 @@ export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string }
         free: res.data.seats.filter((s) => s.free).length,
         total: res.data.seats.length,
         seats: res.data.seats.slice(0, 200),
+        ...(seatMapDataUri(res.data) ? { image: seatMapDataUri(res.data), imageAlt: '图书馆座位平面图' } : {}),
         name: '图书馆座位图',
       },
     };

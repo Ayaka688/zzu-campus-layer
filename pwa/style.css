@@ -368,3 +368,8 @@ main {
 .hint.warn {
   color: #f0b429;
 }
+
+/* 图书馆座位平面图（按 point_x/point_y 还原的 SVG） */
+.seatmap { margin: 8px 0 0; }
+.seatmap img { width: 100%; border-radius: 8px; border: 1px solid #262a31; display: block; }
+.seatmap figcaption { font-size: 11px; color: #8b949e; margin-top: 4px; }
