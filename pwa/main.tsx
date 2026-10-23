@@ -128,6 +128,34 @@ function App() {
     }
   }
 
+  /** 从剪贴板取一次：能认出来就直接导入，省掉「再点保存」那一下。 */
+  async function readClip(): Promise<void> {
+    let text = '';
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      setNote('浏览器不让读剪贴板（需要 https + 一次授权），长按输入框手动粘贴一次');
+      return;
+    }
+    if (!text.trim()) {
+      setNote('剪贴板是空的，先去学校页面复制地址栏');
+      return;
+    }
+    try {
+      const bundle = parseImportLink(text.trim());
+      const next = await importTokenBundle(bundle);
+      setStatuses(next);
+      setLlm(await getLlmSettings());
+      setPaste('');
+      setSheet('none');
+      setNote(bundle.llm?.apiKey ? '导入成功（含模型 key）' : '导入成功');
+      setTimeout(() => setNote(''), 2500);
+    } catch (e) {
+      setPaste(text.trim());
+      setNote(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function doImport() {
     try {
       /* 三种都能收：同步码 / 裸 token / 学校页面的地址 */
@@ -194,6 +222,9 @@ function App() {
           <div class="row">
             <button class="primary" onClick={() => void doImport()} disabled={!paste.trim()}>
               保存
+            </button>
+            <button class="ghost" onClick={() => void readClip()}>
+              从剪贴板读取
             </button>
             <button class="ghost" onClick={() => void doExport()}>
               导出当前码
