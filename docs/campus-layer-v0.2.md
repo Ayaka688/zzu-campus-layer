@@ -66,7 +66,7 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 - **不可代做的操作只能给入口**：预约、报名一律用 `open_service` 给官方链接，并禁止假装成功。
 - **未知工具回错误让它自纠**：模型调 `book_seat` 这种不存在的工具时，回 `{"error":"没有叫 book_seat 的工具，可用：…"}`，模型下一轮自己改口。
 
-规则层同时被强化（离线也生效）：`get_schedule` 加 `period`（上午/下午/晚上）、`search_notice` 收 `query` 并按 `SYNONYMS` 扩同义词（比赛→竞赛/大赛/挑战杯/创新创业/选拔赛）、`matchServices` 同分时按命中字面长度排序（「图书馆一楼」压过「图书馆」）。
+规则层同时被强化（离线也生效）：`get_schedule` 加 `period`（上午/下午/晚上）、`find_notices` 收 `query` 并按 `SYNONYMS` 扩同义词（比赛→竞赛/大赛/挑战杯/创新创业/选拔赛）、`matchServices` 同分时按命中字面长度排序（「图书馆一楼」压过「图书馆」）。
 
 数据红线不变：模型永远不生成课表/成绩/通知正文，这些只来自学校接口 + 模板渲染。
 
@@ -114,13 +114,13 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 
 要点：`weeks` 是**教学周序号**而非自然周；`startTime/endTime` 统一 `HH:mm` 串（服务端给 `800`/`08:00:00` 两种，入口处归一）；`source` 保留来源便于 UI 标注可信度。
 
-## 5. 工具集（v0.2.6，14 个）
+## 5. 工具集（v0.2.7，14 个）
 
 | 工具 | 参数（zod） | 语义 |
 | --- | --- | --- |
 | `get_schedule` | `{week?: int 0–30, day?: 'today'\|'tomorrow'\|1–7, period?: 'morning'\|'afternoon'\|'evening'}` | 默认当前教学周；按天/时段过滤，指定了却没课时明说「没有课」 |
 | `find_free_room` | `{date?: YYYY-MM-DD, campus?, building?, minSeats?, sections?: int[1–20], limit?}` | 全部教室 − 当天占用；`sections` 要求全闲；`building` 走教室名前缀（南核=南1–南3、北核=北1–北5、物理馆=物） |
-| `search_notice` | `{query?, keyword?, days?, limit?}` | 标题+摘要匹配；`query` 会做同义词扩词（比赛→竞赛/大赛/挑战杯…），零命中时列最近 5 条 |
+| `find_notices` | `{query?, keyword?, days?, limit?}` | 标题+摘要匹配；`query` 会做同义词扩词（比赛→竞赛/大赛/挑战杯…），零命中时列最近 5 条 |
 | `get_grades` | `{course?: string}` | 成绩/绩点；按课程名过滤，并按语义把构成分（平时/期中/期末/卷面…）列出——有没有取决于服务端字段 |
 | `get_exams` | `{}` | 考试安排，空则明说 |
 | `get_plan_progress` | `{code?: string}` | 培养方案学分进度：按模块列要求/已通过/在修/还差 + 未修课程清单（默认 `code='01'` 主修） |
@@ -224,7 +224,7 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 | 12 | 扩展同步码 + e2e 加固（2026-10-21） | `bundle:export` 从面板发出 → 3,496 字符码，解回 `{v,jwxt,portal,at}`（jwxt 1,298 字符、含门户票）；顺手修了 e2e 的一个真 bug：token 不再写进 SW target（`Runtime.evaluate` 打到已休眠的 SW 会报 `chrome is not defined`），改成在扩展页面里写并 `Page.reload`，失败路径也会 kill 掉 Edge 不再挂住端口 |
 | 13 | 服务商预设 + 相对路径（2026-10-21） | `tsc` 0 错、**101 passed / 9 skipped**；`vite build` 产物 `dist/pwa/{index.html,pwa-sw.js,pwa.webmanifest}` 且 HTML 全引用 `../assets/…`（子路径可部署）；`pwa-shot` 绿（L1 徽标「由模型判定」、2026-10-23 空教室）；`e2e` 绿（10 工具、`settings inputs:3`、`bundle:llm {provider:"school", model:"DeepSeek-R1"}`、L1 `15.6s via:llm`）；新增 4 条 `llm.test.ts` 用例（换服务商改地址、未知回落学校、402/429 文案、HTTPS+http 服务商直接放弃） |
 | 14 | 地点词 + 模型自由回答（2026-10-21 深夜） | ①`src/core/place.ts`：南核→南1–南3、北核→北1–北5、物理馆→物，按教室名前缀过滤（不用不透明的 `buildingIds`）。实网 `ask('明天南核空教室')` → `count 48`，全部 `^南[123]_`；`e2e` 新增断言 `south-core {"hasSouth":true,"leakedNorth":false}`，标题「2026-10-22 空教室 · 南核心教学区（南1–南3）」。②`parseModelReply` + `via:'llm-chat'`：问「hello」由模型直接作答（徽标「由模型回答」），不再甩能力清单。`tsc` 0 错、**134 passed / 10 skipped**、live 10/10（含新用例）、`e2e` 与 `pwa-shot` 全绿 |
-| 15 | 模型当执行核心（2026-10-22） | ①`toolspec.ts` 手写 10 个工具的 OpenAI tools Schema；`llmChatWithTools` 走 `tool_choice:'auto'`；`agent.runAgent` 最多 4 步、工具结果以 `{text,data}` 回灌、未知工具回错误自纠、`maxSteps` 用完用最后结果兜底。②`applyTextHints` 用用户原话覆盖相对日期与时段（不信模型算日期）。③规则层同步强化：`get_schedule.period`、`search_notice.query` + `SYNONYMS` 扩词、`matchServices` 同分按命中长度排序。④三个原失败说法现在（**不接模型**）即通过：`学校最近有比赛吗` → 4 条真实竞赛通知（AI 智能体大赛 / 市场调查与分析大赛 / 文博创意选拔赛 / 创新创业大赛决赛）；`今天下午我有课吗` → 只回 14:00-15:40 计算学科导论；`预约明天图书馆一楼随便一个位置` → `open_service` 座位预约 `order.lib.zzu.edu.cn`。⑤`tsc` 0 错、**158 passed / 11 skipped**、live **11/11（13.3s）**、`e2e` 全绿（10 工具 + south-core + bundle 断言）、`vite build` 通过（`llm-*.js` 86.92 kB / gzip 26.10）；**真模型（deepseek-chat）实网未验**（本机无可用 key），工具循环逻辑只在单测里用桩响应验证 |
+| 15 | 模型当执行核心（2026-10-22） | ①`toolspec.ts` 手写 10 个工具的 OpenAI tools Schema；`llmChatWithTools` 走 `tool_choice:'auto'`；`agent.runAgent` 最多 4 步、工具结果以 `{text,data}` 回灌、未知工具回错误自纠、`maxSteps` 用完用最后结果兜底。②`applyTextHints` 用用户原话覆盖相对日期与时段（不信模型算日期）。③规则层同步强化：`get_schedule.period`、`find_notices.query` + `SYNONYMS` 扩词、`matchServices` 同分按命中长度排序。④三个原失败说法现在（**不接模型**）即通过：`学校最近有比赛吗` → 4 条真实竞赛通知（AI 智能体大赛 / 市场调查与分析大赛 / 文博创意选拔赛 / 创新创业大赛决赛）；`今天下午我有课吗` → 只回 14:00-15:40 计算学科导论；`预约明天图书馆一楼随便一个位置` → `open_service` 座位预约 `order.lib.zzu.edu.cn`。⑤`tsc` 0 错、**158 passed / 11 skipped**、live **11/11（13.3s）**、`e2e` 全绿（10 工具 + south-core + bundle 断言）、`vite build` 通过（`llm-*.js` 86.92 kB / gzip 26.10）；**真模型（deepseek-chat）实网未验**（本机无可用 key），工具循环逻辑只在单测里用桩响应验证 |
 | 16 | 三个新痛点：成绩按课查 / 图书馆座位 / 一卡通分类（2026-10-22） | ①`get_grades` 加 `course?`，`renderGrades` 按语义捞构成分（`平时|期中|期末|卷面|usual|midterm|final`…），零命中时列出已出分课程；规则层 `extractCourseName` 支持「高数多少分」。②新增 `library_seats` 工具 + `src/core/library.ts`：`POST http://order.lib.zzu.edu.cn/v4/space/pcTopFor` **免登录**拿到各馆实时空闲/总数（实测主校区 929–934 / 2527，37%），渲染成「空闲/总数 + 百分比 + 合计」并给选座直达链接；座位图 `/v4/Space/map` 与下单 `/v4/space/confirm` 回 `您尚未登录`，登录凭据就是统一身份认证的学号+密码，**扩展不碰**。③一卡通分类统计**判定做不到**：`getECardDataList` 只回深链配置、真账目在 `ecard.v.zzu.edu.cn` 需单独登录，已写进 README 限制。④意图：「图书馆还有位置吗」走 `library_seats`，「南核空教室」仍走 `find_free_room`（新增 12 例 `test/library.test.ts` 覆盖，含「不被图书馆规则抢走」）。⑤`tsc` 0 错、**170 passed / 12 skipped**、live **12/12（10.6s，含图书馆用例）**、`e2e` 全绿（11 工具，`library_seats` 60ms）、`vite build` 通过；`manifest.host_permissions` 9→15（新增 `http://order.lib.zzu.edu.cn/*`） |
 | 17 | 图书馆座位级 + 长按确认（2026-10-22） | 新增 library_seat_map（读 /v4/Space/seat，宽容解析、数字状态不猜）与 book_library_seat（只产出待确认动作，面板长按 1.2s 才提交，执行在用户自己的图书馆页面里点选，不复制站点 AES）；新增 public/content/library.js（第 4 个 content script）与 src/ui/hold.tsx；工具 11→13，host 仍是 15 条（复用同一域）；单测 171→179 passed / 12 skipped，tsc 0 错、vite build 通过；**真实下单未由我验证**（会占用户座位）。 |
 | 18 | 座位级取数打通（2026-10-22/23） | ①根因不是 https/TLS：在已登录标签页里用页面同款请求实测 `POST /v4/Space/seat {id:'3', day:'2026-10-23', label_id:[], start_time:'07:30', end_time:'22:30', begdate:'', enddate:''}` → `code 0 / 216 座位 / free_num 123`；空数组的真因是**模型自己填了 areaId=2**，且日期字段是 `day` 不是 `date`。②`libtab.readLibrarySeats` 改成后台直连：`chrome.scripting.executeScript` 读出该标签页 `sessionStorage.token`，后台 `fetch` 带 `authorization: 'bearer'+token`，候选 areaId 轮试 `[模型给的, '3','4','5','6']`，拿到非空座位表才算命中（manifest 加 `scripting`）。③`library.parseSeatMap` 按真实字段收敛：`seatNo` 取 `no`、状态取 `status_name`，`STATUS_NUM` 记 `1=空闲/6=使用中`，fixture 取真实响应 6 条（`total_num:216`、`free_num:58`）。④结果：`tsc` 0 错、**187 passed / 12 skipped**、`vite build` 通过；用户实测成功（列出 216 个座位 / 空 123 / `001-007`、`010-013`…，并出现「长按预约 001」按钮）。 |
@@ -276,3 +276,34 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 - 学校 R1 延迟：一次 11–18s。若学校侧新增非推理模型（或 Open WebUI 支持 `think:false`）应切过去；否则用第三方预设。
 - 自定义 `baseUrl`（自建反代 / 其它兼容网关）：暂不做，理由见 §9.1.1；真要做需引入 `optional_host_permissions` + 授权流程。
 - 自动化部署：`docs/deploy-pwa.md` 里给了三种手工/CLI 放法，还没写成 `scripts/deploy.mjs`（需要用户的托管账号凭据，不适合默认自动化）。
+
+
+## 9.2 通知总入口与课前提醒（2026-10-23 追加，PR #1 合入 + 本地实现）
+
+### 9.2.1 通知总入口（同学 PR #1 贡献）
+
+- 工具从「按关键词搜通知」升级成**一个入口** `find_notices`：门户 CMS 与教务公告两源合并、**按标题去重**，
+  每条渲染成卡片（分类、开讲时间、地点、报名截止、读全文、加入日历）。
+- 六类分类（讲座 / 比赛 / 活动 / 会议 / 教务 / 生活），教务再细分选课/考试/成绩/学籍/毕业/论文/实习；
+  分类词表与口语→分类映射在 `src/core/noticeRules.ts`。
+- 时间/地点/截止**都是从正文里抽的**（接口没有这些字段）：截止句取最晚、活动句取最早，抽不到就不显示。
+- 今日口径按 `Asia/Shanghai` 且凌晨 4 点换日（熬夜看通知不会把昨天的算成今天）。
+- 服务端「先排序再截断」修过一个真 bug：早先教务在前直接 `slice`，会把门户那 30 条整段截掉。
+- 存储只放偏好（订阅分类、关注关键词、已读 id 上限 1000），**不缓存通知本体**，不会越攒越大。
+
+### 9.2.2 课前 30 分钟提醒（安卓壳）
+
+- `src/core/remind.ts`：`buildReminderBlocks(courses, {now, days, termStart})` 把课表切成提醒块——
+  `LEAD_MIN = 30`（开课前 30 分钟）、`GAP_MIN = 40`（同一半天、空档 ≤40 分钟的连堂课并成一条，
+  午休 130 分钟不会被并），过点丢弃，按时间排序；`pushReminders()` 交给壳。
+- 壳侧：`ReminderScheduler`（逐条 `AlarmManager`；Android 12+ 无精确闹钟权限时退 `setAndAllowWhileIdle`）+
+  `ReminderReceiver`（渠道 `class-reminder`，`BigTextStyle`）+ `BootReceiver`（开机/升级后恢复）。
+- 只有安卓壳有这条通道（PWA 没有系统通知权限）；浏览器里 `pushReminders` 直接返回 `false`。
+
+### 9.2.3 本轮验收记录（2026-10-23）
+
+| # | 项 | 结果 |
+| --- | --- | --- |
+| 17 | 合并 PR #1 后全量回归 | `tsc` 0 错、**303 passed / 12 skipped**（25 文件）；合并前 PR 自己的 CI 是 `action_required`（fork 首贡献没人点 Approve），等于这 3417 行没被人验证过 |
+| 18 | 合并后收尾（`b5a22db`） | ①`scripts/e2e.mjs:314` 的 `search_notice` → `find_notices`（CI 不跑 e2e，不改会静默失效）；②`public/content/jwxt.js` 只认 `iss === 'cas.s.zzu.edu.cn'` 的票（PR 给 jwxt 开了 `all_frames:true`，防止把 iframe 里别人的票当登录态）；③补测试后 **305 passed / 12 skipped** |
+| 19 | 课前提醒 | `remind.test.ts` 5 例（单节 / 连堂合并 / 跨午不合并 / 过点不弹 / 教学周过滤）⇒ **244 passed**；`android` workflow 出 APK（artifact `campus-layer-debug-apk`） |
