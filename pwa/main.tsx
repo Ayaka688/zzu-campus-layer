@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
-import { decodeBundle } from '../src/core/kv';
+import { parseImportLink } from '../src/core/kv';
 import { probeLlm } from '../src/core/llm';
 import {
   clearTokens,
@@ -130,7 +130,8 @@ function App() {
 
   async function doImport() {
     try {
-      const bundle = decodeBundle(paste);
+      /* 三种都能收：同步码 / 裸 token / 学校页面的地址 */
+      const bundle = parseImportLink(paste);
       const next = await importTokenBundle(bundle);
       setStatuses(next);
       setLlm(await getLlmSettings());
@@ -177,15 +178,19 @@ function App() {
       {sheet === 'login' && (
         <section class="sheet">
           <p class="hint">
-            在电脑上打开扩展侧边栏 → 点右上角 ⚙ →「生成手机同步码」→ 把那段码发到这里（微信/QQ 发给自己都行），粘贴后保存。
-            一张教务票能用 30 天。
+            <strong>最省事的办法（不用电脑）</strong>：手机浏览器打开 <code>jwxt.zzu.edu.cn</code> 登录一次，进到「教学管理平台」首页后，
+            <strong>长按地址栏复制整个网址</strong>，粘到下面保存即可。
+          </p>
+          <p class="hint">
+            也可以：电脑装扩展 → 侧边栏右上角 ⚙ →「生成手机同步码」→ 把那段码粘进来（微信/QQ 发给自己）。一张教务票能用 30 天。
           </p>
           <textarea
             rows={4}
-            placeholder="粘贴那段码…"
+            placeholder="粘贴学校页面的网址（带 idToken）／eyJ 开头的 token／同步码"
             value={paste}
             onInput={(e) => setPaste((e.target as HTMLTextAreaElement).value)}
           />
+          {note && <p class="hint warn">{note}</p>}
           <div class="row">
             <button class="primary" onClick={() => void doImport()} disabled={!paste.trim()}>
               保存

@@ -109,3 +109,62 @@ export function decodeBundle(code: string): TokenBundle {
     at: Date.now(),
   };
 }
+
+/** 三段式 JWT 的最简判据（不校验签名，只看结构） */
+const looksJwt = (v: string): boolean => v.split('.').length === 3 && v.length > 20;
+
+/**
+ * 从「手机上粘过来的东西」里认出登录态。
+ *
+ * 支持三种粘贴内容：
+ *  - 学校页面的完整地址（…/uniapp/index.html?idToken=eyJ…），手机上登录完直接复制地址栏即可；
+ *  - 直接粘 X-Id-Token（eyJ…）；
+ *  - 桌面面板生成的同步码（base64 bundle，走 decodeBundle）。
+ *
+ * ticket= 是一次性 CAS 服务票据，不是 idToken，所以明确拒绝并给出替代办法。
+ */
+export function parseImportLink(raw: string): TokenBundle {
+  const text = raw.trim();
+  if (!text) throw new Error('粘的东西是空的');
+
+  /* 1) 同步码（base64 bundle） */
+  if (!/^https?:/i.test(text) && !looksJwt(text) && /^[A-Za-z0-9+/=_-]+$/.test(text) && text.length > 40) {
+    try {
+      return decodeBundle(text);
+    } catch {
+      /* 不是同步码，继续往下试 */
+    }
+  }
+
+  /* 2) 直接就是 token */
+  if (looksJwt(text)) return { v: 1, jwxt: text, at: Date.now() };
+
+  /* 3) 学校页面的地址 */
+  if (/^https?:/i.test(text)) {
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      throw new Error('这段链接看起来不完整，重新复制一次地址栏');
+    }
+    const hash = url.hash.includes('?') ? url.hash.slice(url.hash.indexOf('?') + 1) : '';
+    const params = new URLSearchParams(url.search || hash);
+    for (const key of ['idToken', 'userToken', 'token', 'X-Id-Token']) {
+      const v = params.get(key);
+      if (v && looksJwt(v)) return { v: 1, jwxt: v, at: Date.now() };
+    }
+    if (hash) {
+      const q = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+      for (const key of ['idToken', 'userToken', 'token']) {
+        const v = q.get(key);
+        if (v && looksJwt(v)) return { v: 1, jwxt: v, at: Date.now() };
+      }
+    }
+    if (params.get('ticket') || url.search.includes('ticket=')) {
+      throw new Error('这是 CAS 的一次性 ticket（已经用掉了），要复制登录成功之后那一页的地址，里面才有 idToken');
+    }
+    throw new Error('这个链接里没有 idToken。手机上登录后停在「教学管理平台」首页，再复制地址栏');
+  }
+
+  throw new Error('没认出这是什么。可以粘学校页面的地址、eyJ… 开头的 token，或桌面生成的同步码');
+}
