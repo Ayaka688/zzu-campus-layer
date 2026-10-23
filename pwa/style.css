@@ -467,3 +467,11 @@ main {
   border-top: 1px dashed var(--line, #262b36); padding-top: 10px;
 }
 .nb-expired-toggle { align-self: flex-start; }
+
+/* 「打开学校登录页」是个 <a>，得手动对齐成按钮外观 */
+a.primary {
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
+  line-height: 1.6;
+}

@@ -46,6 +46,10 @@ interface Message {
   llmError?: string;
 }
 
+const CAS_LOGIN =
+  'https://cas.s.zzu.edu.cn/cas/login?service=' +
+  encodeURIComponent('https://jwxt.zzu.edu.cn/uniapp/index.html');
+
 const QUICK: Array<{ label: string; text: string }> = [
   { label: '明天有课吗', text: '明天有课吗' },
   { label: '本周课表', text: '这周课表' },
@@ -337,11 +341,27 @@ function App() {
       {sheet === 'login' && (
         <section class="sheet">
           <p class="hint">
-            <strong>最省事的办法（不用电脑）</strong>：手机浏览器打开 <code>jwxt.zzu.edu.cn</code> 登录一次，进到「教学管理平台」首页后，
-            <strong>长按地址栏复制整个网址</strong>，粘到下面保存即可。
+            <strong>办法一：点这个按钮去登录（不用电脑）</strong>
+          </p>
+          <p class="row">
+            <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
+              打开学校登录页
+            </a>
           </p>
           <p class="hint">
-            也可以：电脑装扩展 → 侧边栏右上角 ⚙ →「生成手机同步码」→ 把那段码粘进来（微信/QQ 发给自己）。一张教务票能用 30 天。
+            它会带你去<strong>统一身份认证</strong>（不是在教务站里输树维密码）。登录成功后会自动跳到「教学管理平台」，
+            这时<strong>地址栏里带着 <code>idToken=eyJ…</code></strong> —— 长按地址栏复制整条网址，回来粘到下面保存。
+          </p>
+          <p class="hint">
+            ⚠️ 别直接打开 <code>cas.s.zzu.edu.cn</code> 根地址（没有 service 参数会 404），也别在教务站里输学校账号（那页是树维的，不认统一身份认证）。
+          </p>
+          <p class="hint">
+            <strong>办法二（实测最稳）：用「豫见郑大」App 复制链接。</strong>
+            在 App 里把任意页面「复制链接」，粘到下面即可（链接里带 idToken）。
+            <br />注意：<strong>鸿蒙版实测可用</strong>；<strong>安卓版这个「复制链接」目前是坏的</strong>（剪贴板不变），安卓请走办法一。
+          </p>
+          <p class="hint">
+            <strong>办法三：电脑同步。</strong>电脑装扩展 → 侧边栏 ⚙ →「生成手机同步码」→ 把那段码发到手机粘进来（一张教务票 30 天）。
           </p>
           <textarea
             rows={4}
