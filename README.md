@@ -1,297 +1,295 @@
-# campus-layer
+# 校园信息层 · campus-layer
 
-郑州大学「校园信息层」—— 一个 MV3 浏览器扩展。它不爬页面：从浏览器里取到学校 CAS 下发的 `idToken`，直接调门户与教务的 JSON API，把**课表 / 空教室 / 通知 / 成绩 / 考试**变成一句话就能问的东西，再支持导出 `.ics`。
+> 把郑州大学那堆"点进去、再点进去、再找一下"的学生服务，变成**一句话就能问**的东西。
+>
+> 形态有三个：**浏览器扩展**（侧边栏）、**手机 PWA**（加到主屏幕）、**安卓壳**（WebView + 课前提醒通知）。
+> 没有服务器，没有账号体系，数据全在你自己设备上。
 
-规格来源见 `docs/campus-layer-handoff.md`，实测依据见 `docs/campus-site-probe.md` 与 `docs/campus-platform-architecture.md`；通知卡片（分类/去重/时间抽取/今日口径）见 `docs/notice-hub.md`。
+[![ci](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/ci.yml/badge.svg)](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/ci.yml)
+[![pages](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/pages.yml/badge.svg)](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/pages.yml)
 
-## 它现在能做什么
+**在线演示**：<https://rebeca-aa.github.io/zzu-campus-layer/>
+（只是壳，不含任何人的数据；第一次进去要粘一次你自己的登录态，见 [登录态从哪来](#登录态从哪来)）
 
-| 你可以说 | 它做什么 | 数据来源 |
+---
+
+## 它到底解决什么问题
+
+学校的信息在**门户（豫见郑大）、教务、图书馆、事务中心、超星**等一堆站点里，同一个事实经常要在三个地方找：
+
+| 你想知道 | 旧做法 | 这里 |
 | --- | --- | --- |
-| 「明天有课吗」「今天有课吗」「第 8 周课表」 | 按天/按周列课表，含教室与教师；**问答下方附一张郑大主校区地图**（点图放大，方便对着教室找楼） | 教务 `/lesson/student/course-table` + `public/map/campus.jpg` |
-| 「明天下午哪里能自习」「明天南核空教室」「主校区 200 人以上的空教室」 | 全部教室 − 当天占用，算出空闲节次；**认地点词**（南核 / 北核 / 北1 / 物理馆 / 材料馆） | 教务 `/room/place/rooms` + `/room/place/room-occupancy` |
-| 「今天下午我有课吗」「明天上午有课吗」 | 按时段收窄，只列那个时段的课（不再把整天倒出来） | 教务课表 + 本地时段表 |
-| 「查一下 XX 的通知」「学校最近有比赛吗」 | 教务通知（完整正文）+ 门户通知（摘要）；**口语话题自动扩同义词**（比赛→竞赛/大赛/挑战杯…） | 教务 `/protal-notice/get-notices` + 门户 CMS |
-| 「今天有什么讲座」「这周有比赛吗」「挑战杯什么时候截止」 | 通知**卡片**：讲座/比赛/活动/会议/教务/生活六类（教务再细分选课/考试/成绩/学籍/毕业/论文/实习…），每条带开讲时间、地点、报名截止；可按分类/时间窗筛、按发布或截止排序；可导出 `.ics`（截止提前 1 天响） | 同上两个来源，跨来源按标题去重 |
-| 「我这学期绩点多少」「高数多少分」「考试安排」 | 成绩 / 考试列表；**可按课程名过滤**，并带出服务端给的构成分（平时/期中/期末/卷面，字段因课而异） | 教务 `/grade/student/grades`、`/exam/student/exam` |
-| 「图书馆还有位置吗」「明天图书馆有空位吗」 | 各馆**实时空闲/总数**（免登录），给百分比 + 楼层明细 + 选座入口 | 图书馆空间预约 `/v4/space/pcTopFor`（`order.lib.zzu.edu.cn`，仅校内网） |
-| 「一楼大厅哪些座位空着」「帮我订 001」 | 打开过图书馆预约页（已登录）后，可读**座位级**空闲号；并**按坐标画一张座位平面图**（绿点空闲/灰点占用）；下单只在**长按确认**后才执行，且是在你自己那个标签页里点，扩展不碰密码 | 页面内 content script（`content/library.js`）+ `/v4/Space/seat` |
-| 「我想自习两小时」「找个安静地方看会儿书」 | **教室 + 图书馆合成一个入口**：按时长、步行距离（`walk.ts` 楼间表）排序，凑不够时长会分级说「这个只能坐 1 小时」 | 教务教室占用 + 图书馆余量 + 本地步行表 |
-| 「明天上午哪间教室能坐两小时」 | 每间教室给出**连续空闲窗口**：`08:00–12:00`、`现在就能坐 2 小时 40 分`，不再只说「1-4 节空」 | 教务 `/room/place/rooms` + 本地 `freeWindows` |
-| （自动，不用问） | 每天后台跑（最多 3 次）：**新出成绩**、**7 天内截止**的报名/申请类通知；**一条截止一条系统通知，点开直接定位到那张卡**；同一条截止不重复推；首次运行不刷历史成绩 | 教务成绩/通知 + `chrome.notifications` + `chrome.alarms` |
-| 「我还差多少学分毕业」「培养方案完成情况」 | 按模块列要求/已通过/在修/还差，并用进度条画出缺口 | 教务 `/plan/search/completion/info?code=01` |
-| 「打开座位预约」「报修在哪」「食堂怎么订餐」 | 从 19 项门户服务里认出你要的，直接给官方入口（面板里是可点按钮） | 本地服务目录 `src/core/catalog.ts`（来自门户 `/v2/service/serviceShowAll`） |
-| 「我卡里还有多少钱」「最近消费」 | 一卡通余额 + 最近消费/充值流水 | 门户 `/v2/personalData/getMyECard` |
-| 「有什么要办的事」「待办事项」 | 待办/在办/待申请计数，紧急与超时单独标出 | 事务中心 `/ttc/v1/count/ttcCount` + `/ttc/api/ttc/center-list/getToDoList` |
-| 「把课表导出成日历」 | 生成带 `Asia/Shanghai` 时区的 `.ics` | 本地生成 |
+| 明天几点上课、在哪栋楼 | 门户 → 服务 → 教务 → 课表 → 缩放到今天 | 「明天有课吗」 |
+| 现在哪间教室能坐两小时 | 教务 → 空闲教室 → 选校区 → 选节次 → 一格格看 | 「现在哪能坐两小时」 |
+| 那门课考了多少分 | 教务 → 成绩 → 找课程 | 「高数多少分」 |
+| 有没有跟我有关的通知 | 门户、教务各刷一遍 | 「今天有什么讲座」 |
+| 图书馆还有位置吗 | 另开一个站点，还要登录 | 「图书馆还有位置吗」 |
 
-**没有 LLM 也能用**：意图解析是规则层（`src/core/intent.ts`），回答是模板渲染（`src/core/render.ts`）。模型是可选的增强，不是前置依赖。
+它是**只读优先**的：查数据、算空闲、渲染卡片。唯一会"写"的操作（预约图书馆座位）必须你**长按 1.2 秒**确认，而且是在你自己登录的那个标签页里点，扩展不碰你的密码。
 
-## 模型怎么参与（两种模式，2026-10-22 起）
+---
 
-规则层仍然先跑（免费、几十毫秒、离线可用）。模型是不是「执行核心」取决于服务商**是否支持 function calling**：
+## 三种用法
+
+| 形态 | 适合 | 能力 | 怎么装 |
+| --- | --- | --- | --- |
+| **浏览器扩展**（MV3） | 电脑日常用 | 全部 14 个工具 + 通知卡片 + 每日盯梢 | 见 [60 秒上手](#60-秒上手扩展) |
+| **PWA** | 手机（安卓/iOS 都能加主屏幕） | 除"每日盯梢"外的全部；可带模型 key | 打开 [在线演示](https://rebeca-aa.github.io/zzu-campus-layer/) → 加主屏幕 |
+| **安卓壳**（可选） | 想要原生图标 + **课前 30 分钟通知** | PWA 全部 + AlarmManager 提醒 | 从 Actions 下 `campus-layer-debug-apk` |
+
+> 手机 Chrome 至今不支持扩展（Kiwi 已停更），所以手机走 PWA；安卓壳只是把同一个 PWA 包进 WebView，顺便拿到系统通知能力。
+
+---
+
+## 60 秒上手（扩展）
+
+```powershell
+npm install --ignore-scripts   # 沙箱里必须加 --ignore-scripts，见「开发」一节的坑
+npm run build                  # 产物在 dist/
+```
+
+1. `edge://extensions`（或 `chrome://extensions`）→ 打开「开发人员模式」→「加载解压缩的扩展」→ 选仓库里的 `dist`。
+2. 浏览器里登录一次 `https://jwxt.zzu.edu.cn/uniapp/index.html`（教务）和/或 `https://uniapp.s.zzu.edu.cn`（门户）。
+3. 点工具栏图标打开侧边栏，顶部两枚药丸变绿就能问了。
+
+> 教务 token 有效期 30 天，门户 8 小时。过期了重新打开对应页面就自动续上。
+
+---
+
+## 能问什么
+
+**课表 / 自习**
+
+| 说法 | 做什么 |
+| --- | --- |
+| 「明天有课吗」「第 8 周课表」 | 按天/按周列课，带教室和教师；答案下面附一张校园地图（可选） |
+| 「今天下午我有课吗」 | 按时段收窄，只列那个时段的课 |
+| 「明天南核空教室」 | 全部教室 − 当天占用；**认地点词**：南核/北核/北1/物理馆/材料馆/图书馆 |
+| 「明天上午哪间教室能坐两小时」 | 给每间教室的**连续空闲窗口**（`08:00–12:00`、`现在就能坐 2 小时 40 分`） |
+| 「我想自习两小时」 | 教室 + 图书馆合成一个入口，按时长和步行距离排序；凑不够会分级说「这个只能坐 1 小时」 |
+
+**通知**
+
+| 说法 | 做什么 |
+| --- | --- |
+| 「今天有什么讲座」「这周有比赛吗」「挑战杯什么时候截止」 | 通知**卡片**：讲座/比赛/活动/会议/教务/生活六类（教务再细分选课/考试/成绩/学籍/毕业/论文/实习），每条带开讲时间、地点、报名截止；可筛分类/时间窗、按发布或截止排序 |
+| 「查一下 XX 的通知」 | 教务通知（完整正文）+ 门户通知（摘要）；口语话题自动扩同义词（比赛 → 竞赛/大赛/挑战杯） |
+
+**成绩 / 学分 / 一卡通 / 待办**
+
+| 说法 | 做什么 |
+| --- | --- |
+| 「我这学期绩点多少」「高数多少分」 | 成绩/考试列表；可按课程名过滤，带出服务端给的构成分（平时/期中/期末/卷面——有什么给什么） |
+| 「我还差多少学分毕业」 | 按模块列要求/已通过/在修/还差，带进度条 |
+| 「我卡里还有多少钱」「最近消费」 | 一卡通余额 + 最近流水 |
+| 「有什么要办的事」 | 待办/在办/待申请计数，紧急与超时单独标出 |
+
+**图书馆**
+
+| 说法 | 做什么 |
+| --- | --- |
+| 「图书馆还有位置吗」 | 各馆实时空闲/总数（免登录），带楼层明细和百分比 |
+| 「一楼大厅哪些座位空着」 | 座位级空闲号 + 按坐标画一张平面图（绿点空、灰点占，每个空座标号） |
+| 「帮我订 001」 | 生成**长按 1.2 秒**的确认按钮；确认后才在你自己的页面里点座位、点预约、点确认，并按页面反馈如实回报 |
+
+**其它**
+
+| 说法 | 做什么 |
+| --- | --- |
+| 「打开座位预约」「报修在哪」「食堂怎么订餐」 | 从 19 项门户服务里认出你要的，给官方入口（面板里是可点按钮） |
+| 「把课表导出成日历」 | 生成带 `Asia/Shanghai` 的 `.ics` |
+
+**不用问的（自动）**：每天后台跑最多 3 次，盯「新出成绩」和「7 天内截止的报名/申请类通知」，一条截止一条系统通知，点开直接定位到那张卡；同一条不重复推；首次运行不刷历史。
+
+> **没有模型也能用。** 意图是规则（`src/core/intent.ts`），回答是模板（`src/core/render.ts`）。模型是可选增强，不是前置依赖。
+
+---
+
+## 模型（可选）
+
+规则层先跑（免费、几十毫秒、离线可用）。模型怎么参与，取决于服务商**支不支持 function calling**：
 
 | 模式 | 谁在用 | 模型干什么 |
 | --- | --- | --- |
-| **Agent 循环**（新） | DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter | 模型自己决定「调哪个工具、传什么参数」→ 拿到真实数据后**自己组织自然语言回答**；一轮不够可以继续调（最多 4 步）。工具规格在 `src/core/toolspec.ts`，14 个工具全覆盖 |
-| **判意图**（老） | 学校 DeepSeek（只有 `DeepSeek-R1`，Open WebUI 不暴露 tools） | 只输出 `{tool,args}`，正文由模板渲染 |
+| **Agent 循环** | DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter | 自己决定调哪个工具、传什么参数 → 拿到真实 JSON 后自己组织回答；一轮不够可继续调（最多 4 步） |
+| **判意图** | 学校 DeepSeek（Open WebUI 不暴露 tools） | 只输出 `{tool,args}`，正文由模板渲染 |
 
-Agent 模式下模型看到的是工具返回的**真实 JSON**，提示词里明确写死：只许用工具返回的内容、不许编数字/课程名/通知标题、相对日期不许自己换算（由 `applyTextHints` 按用户原话覆盖）、预约报名这类必须本人操作只能给入口且不许假装成功。所以「模型幻觉」变成「答得不好」，不会变成「编出假课表」。
+护栏写在提示词里：只许用工具返回的内容、不许编数字/课程名/通知标题、相对日期不许自己换算（由用户原话覆盖）、预约报名必须本人操作只能给入口。
 
-界面上会显示这轮模型调了哪些工具（例如 `模型编排 · find_free_room`），出问题一眼能看出是它没调工具还是调错了。
-
-**追问能接住**：面板与手机版都会把最近 3 轮对话带上去（`history`），「那明天呢」不用再重复整句。
-
-代价：每条没被规则命中的话都要过一次模型。工具循环通常 1–3 秒（`deepseek-chat` 这类非推理模型），超时上限 45 秒；学校 R1 走老模式，11–25 秒。
-
-服务商是预设的六选一（`src/core/llm.ts` 的 `LLM_PROVIDERS`），换服务商时模型名会自动填成该家的默认值：
+界面上会显示这轮调了哪些工具（`模型编排 · find_free_room`），出问题一眼能看出是没调工具还是调错了。追问也能接住——面板和手机版都会带上最近 3 轮对话。
 
 | 预设 | 接口 | 默认模型 | 前提 |
 | --- | --- | --- | --- |
-| 学校 DeepSeek | `http://chat.zzu.edu.cn/api` | `DeepSeek-R1` | **只在校园网 / VPN**，且**页面必须是 http**（HTTPS 会被混合内容拦） |
-| DeepSeek 官方 | `https://api.deepseek.com` | `deepseek-chat` | 自己的 key，HTTPS 页面可用 |
+| 学校 DeepSeek | `http://chat.zzu.edu.cn/api` | `DeepSeek-R1` | 只在校园网/VPN；页面必须是 http（HTTPS 会被混合内容拦） |
+| DeepSeek 官方 | `https://api.deepseek.com` | `deepseek-chat` | 自己的 key，HTTPS 可用 |
 | 硅基流动 | `https://api.siliconflow.cn/v1` | `Qwen/Qwen2.5-7B-Instruct` | 同上 |
 | 阿里百炼 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` | 同上 |
 | Moonshot | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` | 同上 |
 | OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-chat` | 同上 |
 
-第三方这几家都实测过 CORS 预检放行（`allow-headers: authorization,content-type`），所以浏览器能直连，不需要中转。非推理模型一次 **0.5–2 秒**，比学校的 R1（11–18 秒）快一个数量级，费用约 ¥0.001/次。
+代价：非推理模型一次 0.5–2 秒（约 ¥0.001/次）；学校 R1 走老模式，11–25 秒。判断不了就回落成反问，并在气泡下面写清原因（401/402/403/404/429 各有说法）。
 
-### 用学校的 DeepSeek
+---
 
-学校给在校生开了 `http://chat.zzu.edu.cn`（自建 Open WebUI 0.5.18）。开法（三步，一次性）：
+## 登录态从哪来
 
-1. 浏览器打开 `http://chat.zzu.edu.cn`，用 CAS 登录（验证码收不到就用「客户端扫码」那个二维码，豫见郑大 App 扫）。
-2. 右上角头像 → 设置 → 账号 → 「API 密钥」→ 显示 → 「+ 创建新安全密钥」，复制 `sk-…`。
-3. 侧边栏点 `⚙` → 勾选开关 → 服务商选「学校 DeepSeek」→ 粘贴 key（失焦即存）。
+令牌是 CAS 下发的 `X-Id-Token`（JWT）。三条获取路径，按场景选：
 
-**第 2、3 步可以省掉**：扩展里有 `content/chat.js`，只要你在同一个浏览器登录过 `chat.zzu.edu.cn`，它会把页面里的会话交给扩展，扩展拿会话去换一个 `sk-` key 自动填好（侧边栏「从已登录的 DeepSeek 页面自动获取」也是这个动作）。正常流程是：登录一次 WebUI → 打开侧边栏 → 勾一下开关。
-
-### 用自己的 key
-
-`⚙` → 服务商选一家 → 粘自己的 key。这条路在 **HTTPS 页面上也能用**，所以手机 PWA 装到主屏幕（必须 HTTPS）时，想要模型就选它。
-
-### 关于安全的实话
-
-- key 的权限**等同于你在那家服务的使用权**；学校那条等于你 WebUI 账号的用量，不含密码、不含教务/门户权限。
-- 只存在 `chrome.storage.local`（手机版是 `localStorage`），扩展没有任何上报通道，请求只发给你选的那家。
-- 学校那条走 `http://` 明文（该校 443 的 TLS 是坏的），且只在校园网/VPN 内可达；出了内网根本连不上。
-- 同步码里会带 key（方便手机直接用），**别把同步码发到群里**。
-
-### 注意事项
-
-- 想让它「像 GPT 一样能自己查、自己答」，就选**支持 function calling 的服务商**（DeepSeek 官方那家最省事，`deepseek-chat` 一次 1–3 秒）。
-- 学校那条（R1）**不支持 tools**，只能走老模式（判意图 + 模板），而且会先想再答，实测一次 **11–25 秒**；所以它只适合偶尔兜底。超时 45 秒后回落成反问。
-- HTTPS 页面 + 学校预设 = 直接放弃（不白等），界面会就地提示换服务商。
-- 不填 key 就完全离线，功能不受影响（规则层 + 模板）。
-
-### 连不上时会怎样（2026-10-21 修）
-
-以前模型失败是**静默**的：只回落成「我可以直接回答这几类问题…」，你分不清是 key 挂了、断网了，还是模型没听懂。现在：
-
-- 答案气泡底部会直接写原因，例如「模型没帮上忙：DeepSeek 官方的 API Key 无效或已过期（Authentication Fails, Your api key: ****test is invalid）」。401/402/403/404/429 各有各的说法。
-- `⚙` 里多了「**测试连接**」按钮：直接打一次最短请求，通就显示 `连通 ✓ 320ms（deepseek-chat 回：ok）`，不通就显示原文错误。
-- 学校那条 key 失效时（`Your session has expired`），只要你还在浏览器里登录着 `chat.zzu.edu.cn`，扩展会**自动换一次 key 并重试**，不用手动点同步。
-- 找不到原因时跑 `node scripts/diag-llm.mjs`：它在真实扩展环境里分别从「面板页」和「Service Worker」各打一次模型接口，把 status/耗时/错误原文全打出来。
-
-
-## 快速开始
-
-```powershell
-cd campus-layer
-npm install --ignore-scripts   # 沙箱里必须加，原因见「npm 的三个坑」
-npm run build                  # 产物在 dist/
-```
-
-运行环境：Node 24 / npm 11；构建链 vite 8.3.4、vitest 5.0.5、TypeScript 5.6（`npm audit` 干净）。
-
-然后在 Edge / Chrome 打开 `edge://extensions`（或 `chrome://extensions`），开启「开发人员模式」→「加载解压缩的扩展」→ 选 `dist`。
-
-首次使用：
-
-1. 在浏览器登录 `https://uniapp.s.zzu.edu.cn`（门户）和/或 `https://jwxt.zzu.edu.cn/uniapp/index.html`（教务）。
-2. 打开一次这两个页面，content script 会自动把 token 交给扩展（面板顶部两枚药丸变绿）。
-3. 点工具栏图标 → 侧边栏打开，直接问。
-
-> 教务 token 的 TTL 是 30 天，门户是 8 小时。过期后重新打开对应页面即可续上。
-
-## 手机上用（PWA）
-
-手机上的 Chrome 装不了扩展（Android 至今不支持；Kiwi 已停更），所以同一套 `src/core/` 又打了一个网页版：`dist/pwa/`。加到主屏幕后它就是个 App，走的还是同样的接口。
-
-### 一句话原理
-
-PWA 就是一个**静态网页**，只不过带了 `manifest` 和 service worker。浏览器允许「加到主屏幕」（变成独立图标、全屏、没地址栏），**前提是这个网页跑在 HTTPS 上**。所以要把它放到一个免费静态托管上——不需要服务器、不需要数据库、不需要域名，上传完就有地址。
-
-### 三步上手（不需要懂前端）
-
-```powershell
-npm install --ignore-scripts
-npm run build
-```
-
-跑完会有一个 `dist/` 目录，里面就是要上传的东西。
-
-**第 1 步：把这个目录变成网址。** 三选一，都不用信用卡：
-
-| 方式 | 适合谁 | 操作 | 最后拿到的地址 |
-| --- | --- | --- | --- |
-| **GitHub Pages**（推荐，仓库已经配好） | 有这个仓库的人 | 仓库 Settings → Pages → Source 选 **GitHub Actions** → 回到 Actions 页等 `pages` 跑完 | `https://<你的用户名>.github.io/zzu-campus-layer/` |
-| **Cloudflare Pages** | 想拖拽上传 | 打开 pages.cloudflare.com → Create → Upload assets → 把 `dist/` **里面的东西**拖进去（不是 `dist` 这个文件夹本身） | `https://<项目名>.pages.dev/` |
-| **Netlify Drop** | 最省事，不用注册也行一时 | 打开 app.netlify.com/drop → 把 `dist/` 拖进去 | `https://<随机名>.netlify.app/` |
-
-> 上传时**上传 `dist/` 里的内容**，不要多包一层目录。构建产物全是相对路径，所以放在域名根或子路径都能跑，不用改配置。
-
-**第 2 步：在手机上装成 App。**
-用手机浏览器打开上面拿到的地址 → 安卓 Chrome 右上角 `⋮` →「**添加到主屏幕**」/「安装应用」；iOS Safari 是底部分享 →「添加到主屏幕」。
-装完之后点图标是独立窗口，跟原生 App 差不多。
-
-**第 3 步：把登录态搬过去。**
-
-> **推荐：手机上自己搞，不用电脑。** 手机浏览器打开 `https://jwxt.zzu.edu.cn` → 用学号密码登录一次（或走扫码验证）→ 停在「教学管理平台」首页 → **长按地址栏复制整个网址** → 回到本应用，点右上角「**登录态**」，把网址粘进去 → 保存。网址里的 `idToken` 会被自动认出来，一张教务票能用 30 天。
-
-也可以走电脑同步（旧办法，同样有效）：
-
-1. 电脑上：扩展面板 → `⚙` →「**生成手机同步码**」→ 复制那串 `eyJ…`；
-2. 用微信/QQ 发给自己（或者任何能跨设备复制的方式）；
-3. 手机上：点右上角「**登录态**」→ 粘进去 → 保存 → 药丸变成「教务 · 30 天」就好了。
-
-三种粘贴内容都认：**学校页面网址**（含 `idToken`）、**`eyJ…` 开头的裸 token**、**电脑生成的同步码**。
-
-之后就能问「明天有课吗」「明天南核空教室」「我还差多少学分」这些了。「明天有课吗」「明天南核空教室」「我还差多少学分」这些了。「明天有课吗」「明天南核空教室」「我还差多少学分」这些了。
-
-### 本地先看一眼（不部署）
-
-```powershell
-npm run build
-npm run pwa:serve      # 打开 http://127.0.0.1:8899/pwa/index.html
-npm run pwa:shot       # 或者：无头 Edge + 390×844 移动视口自动跑一遍，出 .pwa-*.png
-```
-
-`pwa:serve` 只是看效果用的：`localhost` 也算安全上下文，所以能装；换成局域网 IP（`http://192.168.x.x:8899`）就装不了，只能当普通网页查数据。
-
-### 常见卡点
-
-| 现象 | 原因 | 怎么办 |
+| 场景 | 做法 | 有效期 |
 | --- | --- | --- |
-| 「添加到主屏幕」不出现 / 装完没有图标 | 不是 HTTPS，或者 manifest 没被取到 | 确认地址是 `https://`；`https://…/pwa/pwa.webmanifest` 能直接打开 |
-| 打开是白的 | `dist` 上传时多套了一层目录 | 上传 `dist/` **里面的**文件，站根应该能直接看到 `index.html` |
-| 改了配置手机上还是旧的 | service worker 有缓存 | 手机上关掉页面重开；还不行就在浏览器设置里清这个站点的站点数据 |
-| 查询报「没有访问权限01」 | 同步码过期（教务 30 天、门户 8 小时） | 回电脑重新生成一次同步码 |
-| 手机上选学校 AI 一直失败 | HTTPS 页面调 `http://chat.zzu.edu.cn` 属于混合内容，被浏览器拦 | 换第三方预设（DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter）+ 自己的 key |
-| 想发给同学用 | 这个网页不含任何账号 | 直接发地址就行，**别把同步码发给别人**（那等于发登录态） |
+| 电脑扩展 | 登录学校页面，content script 自动采集 | 教务 30 天 / 门户 8 小时 |
+| 手机 PWA（推荐） | 手机浏览器打开 `https://jwxt.zzu.edu.cn` 登录 → 停在首页 → **长按复制整个网址** → 回到应用粘贴 | 30 天 |
+| 安卓壳 | 菜单「用浏览器登录」在系统浏览器里登录，回来点「导入剪贴板」 | 30 天 |
 
-几条实话：
+三种粘贴内容都认：**学校页面网址**（含 `idToken`）、**`eyJ…` 裸 token**、**电脑生成的同步码**（扩展 `⚙` →「生成手机同步码」）。
 
-- **必须 HTTPS（或 localhost）**：service worker 与「添加到主屏幕」都要求安全上下文。局域网 `http://192.168.x.x:8899` 能打开页面、也能查数据（接口 CORS 都放行），但**装不了**，只能当普通网页用。
-- 构建产物**都是相对路径**（`../assets/…`、`./pwa.webmanifest`、`start_url: './index.html'`），所以放域名根或子路径都能用（GitHub Pages 项目页不需要改配置）。
-- **HTTPS 页面调不了学校的 AI**：`chat.zzu.edu.cn` 只有 http（443 上不是 TLS），HTTPS 页面去 fetch 它会被浏览器按**混合内容**拦掉（实测报 `Mixed Content: … This request has been blocked`）。所以要模型就换第三方预设；数据类功能两边都正常。
-- 同步码是 **base64 编码，不是加密**：里面就是 `X-Id-Token`（还可能带你的模型 key），等同登录态。别贴到公开的地方；导入后可以在扩展里「清除 token」或等它自然过期（教务 30 天）。
-- 手机版**也能用模型兜底**：同步码里会带上桌面端填好的 key，导入即生效；也可以在现场手动填（登录态面板底部）。
-## 目录
+---
+
+## 隐私与安全
+
+- **没有服务器。** 请求从你的浏览器直接发往学校域名（以及你自己选的模型服务商），中间没有本项目的中转。
+- **令牌只在本地。** 存在 `chrome.storage.local`（扩展）或 `localStorage`（PWA/壳）。同步码是 **base64 编码，不是加密**——等同登录态，别发到群里。
+- **模型 key 的权限**等于你在那家服务的使用权，不含密码、不含教务/门户权限。可以随时在服务商后台重置。
+- **只读优先。** 唯一的写操作（图书馆预约）需要长按确认，且在你自己登录的页面里执行。
+- **权限**：15 个域（8 个学校域 + `http://chat.zzu.edu.cn/*` + `http://order.lib.zzu.edu.cn/*` + 5 家模型服务商），不申请 `<all_urls>`。API 权限 `storage, alarms, sidePanel, scripting, notifications`——`scripting` 只用来读你自己那个图书馆标签页的 `sessionStorage.token`。
+
+---
+
+## 它是怎么做到的
+
+不走"抓网页"：门户和教务都是 uni-app 的 SPA，DOM 没有稳定语义，`nth-child` 一改版就漂。这两套系统的 App 和网页**共用同一份代码**，只靠 `X-Terminal-Info` 区分渠道——所以只要拿到 `idToken`，能做的事和官方 App 完全一样，还比解析 DOM 稳。
 
 ```
-src/core/        与运行环境无关的纯逻辑（可 node 下单测，扩展与 PWA 共用）
-  types.ts       zod 模型：Course / Notice / Term / Room / FreeRoom / Grade / Exam / Card / Todo
-  notice.ts      通知卡片：分类 + 教务子类 + 时间/地点抽取 + 去重 + 排序/过滤/搜索打分 + 今日口径 + 凌晨 4 点换日
-  noticeRules.ts 通知分类词表（6 类 + 教务 10 个子类）、口语→分类、同义词扩词、截止/活动/地点抽取规则
-  noticeStore.ts 通知的个人设置：订阅分类、关注关键词、已读、提醒定位交接（经 kv.ts）
-  kv.ts          存储抽象（扩展用 chrome.storage.local，网页用 localStorage）+ 同步码编码
-  http.ts        统一请求头、三种信封拆包、ApiError
-  jwt.ts         atob 解码 JWT、claims → 用户信息与过期时间
-  portal.ts      门户 portal-api：事件、节次表、教学周、CMS 通知、一卡通、待办
-  jwxt.ts        教务 eams-door / eams-micro-server：学期、课表、成绩、考试、教室、占用、通知、培养方案
-  library.ts     图书馆空间预约的免登录余量接口（`order.lib.zzu.edu.cn`，只有 http）+ 座位图宽容解析
-libtab.ts      和图书馆页面里的 content script 说话（找标签页、发消息、把错误翻成人话）
-  services.ts    CampusService：缓存 + 降级（教务优先，无教务时用门户反推）
-  ics.ts         课表 → RFC 5545
-  render.ts      模板回答（无模型兜底）
-  intent.ts      L0 规则意图解析
-  catalog.ts     门户服务目录（19 项）+ 关键词匹配，供「一句话直达」用
-  llm.ts         L1 兜底：6 家服务商预设（学校 Open WebUI / DeepSeek / 硅基流动 / 百炼 / Moonshot / OpenRouter）+ 意图判定 + 参数收敛 + `llmChatWithTools`（function calling）
-  toolspec.ts    给模型看的工具规格（OpenAI tools JSON Schema，手写，描述即提示词）
-  tools.ts       14 个工具定义（schema + run；通知只有一个入口 find_notices）
-  storage.ts     token / LLM 设置 / 状态（经 kv.ts，两种运行环境通用）
-  agent.ts       ask(text) → 规则优先；能调工具时进 runAgent 循环（最多 4 步，带 history），否则走老的判意图路径
-src/ui/rich.tsx  面板与 PWA 共用的渲染件（轻量 markdown、校园地图、下载）
-src/ui/llm-fields.tsx  面板与 PWA 共用的模型设置控件（服务商 / key / 模型名）
-src/ui/notice.tsx  通知卡片（今日卡 / 分类时间线 / 搜索 / 读全文 / 加入日历 / 已读 / 已截止折叠），面板与 PWA 共用
-src/background/  service worker：消息路由、sidePanel、alarms
-sidepanel/       Preact 侧边栏
-pwa/             Preact 手机网页版（入口 index.html；manifest 与 service worker 在 public/pwa/）
-public/          manifest.json + content scripts（原生 JS，不经构建）
-  map/campus.jpg 郑大主校区手绘地图（1280×2044），课表回答里附在答案下面
-  icons/         PWA 图标（192 / 512）
-  pwa/pwa.webmanifest, pwa/pwa-sw.js  PWA 的清单与壳缓存（相对路径，支持子路径部署）
-test/            vitest：离线用 fixtures，实网用 test:live
-scripts/         capture.mjs（抓真实响应脱敏成 fixture）、e2e.mjs（真浏览器验证扩展）、
-                 pwa-shot.mjs（无头 Edge 手机视口验证 PWA）、serve-pwa.mjs（本地静态服务）、
-                 explore*.mjs / probe-*.mjs / grep-chunks.mjs（接口逆向用的小工具）
+CAS 登录 ──> idToken (JWT)
+              │
+   ┌──────────┴───────────┬───────────────┬──────────────┐
+   ▼                      ▼               ▼              ▼
+门户 portal-api      教务 eams-*     事务中心 ttc    图书馆 v4
+课表/节次/CMS通知    课表/成绩/教室/  待办          馆级余量（免登录）
+一卡通             培养方案/通知                   座位图（需页面登录）
+   │                      │               │              │
+   └──────────┬───────────┴───────────────┴──────────────┘
+              ▼
+      services.ts（缓存 + 降级）→ tools.ts（14 个工具）
+              ▼
+      intent.ts（规则，几十毫秒）→ 命中就出答案
+              │ 没命中
+              ▼
+      llm.ts（可选）：agent 循环 or 判意图 → render.ts 模板渲染
 ```
 
-## 测试
+更多细节：[平台架构](docs/campus-platform-architecture.md)、[接口实测](docs/campus-site-probe.md)、[服务盘点](docs/portal-services-inventory.md)、[通知卡片规则](docs/notice-hub.md)。
 
-```powershell
-npm run verify           # 等价于 typecheck + test + build（直接跑 node 入口，见下）
-npm run typecheck
-npm test                 # 离线：用 test/fixtures 里的真实响应快照
-npm run test:live        # 实网：读 ../tmp/zzu/*.txt 里的 token，需要登录态
-npm run build
-npm run e2e              # 真浏览器：起 Edge + 加载 dist/，用 CDP 跑一遍面板与 10 个工具
-npm run pwa:shot         # 真浏览器：无头 Edge + 移动视口跑 PWA（导入同步码 → 问课表 → 问空教室）
-```
-
-> 装依赖的两个坑（本机实测）：`npm install` 会因沙箱挡 `%LOCALAPPDATA%\npm-cache` 报 `EPERM`，
-> 需要 `$env:npm_config_cache = "<工作区>\.npm-cache"`；lifecycle 脚本会 `spawn EPERM`，
-> 用 `npm install --ignore-scripts`。`npx tsc` 会去 registry 下 `tsc` 包，所以一律跑入口文件：
-> `node node_modules/typescript/lib/tsc.js`、`node node_modules/vitest/vitest.mjs`、`node node_modules/vite/bin/vite.js`。
-
-`test/fixtures/` 是从真实接口抓下来、脱敏后的快照（姓名/学号替换），所以归一化逻辑有真实形状兜底，不靠手搓样例。
-
-## 实测接口（全部已跑通）
-
-| 域 | 基址 | 用途 |
-| --- | --- | --- |
-| 门户 | `https://info.s.zzu.edu.cn/portal-api` | 课表事件、节次表、教学周、CMS 通知、一卡通 |
-| 事务中心 | `https://transaction.s.zzu.edu.cn/ttc` | 待办计数与待办列表 |
-| 教务门面 | `https://jwxt.zzu.edu.cn/eams-door/api/v1` | 用户信息、今日日程、通知（完整正文）、服务列表 |
-| 教务业务 | `https://jwxt.zzu.edu.cn/eams-micro-server/api/v1` | 学期、课表、成绩、考试、教室、占用、培养方案 |
-| 图书馆空间预约 | `http://order.lib.zzu.edu.cn/v4` | 各馆实时座位余量（免登录；座位图/下单需学号密码） |
-
-服务目录与「哪些服务能接、哪些接不了」的完整盘点见 [`docs/portal-services-inventory.md`](docs/portal-services-inventory.md)。
-
-统一鉴权头：`X-Id-Token: <JWT>` + `X-Terminal-Info: h5` + `X-Device-Info: PCWin32NT`。服务端把「未登录」也回 HTTP 200，业务码写在 body 里（`code:-1 没有访问权限01`），所以 `http.ts` 拆包时会抛 `ApiError`。
-
-空教室怎么算（踩过坑，记一下）：
-
-- 教室列表 `POST /room/place/rooms` 带上 `date` 参数时，**每间教室自己带 `roomOccupationInfoVms`**，里面既有 `activityType: "Lesson"`（排课）也有 `RoomBorrow`（借用）——这才是真实占用。
-- `POST /room/place/room-occupancy` 只返回借用，一天只有个位数（实测 8 条），拿它求差会得出「全天空闲」，是错的。
-- **地点词走教室名前缀**，不走服务端的 `buildingIds`（那套 id 不透明、跨学期会变）：教室名长这样 `南1_303` / `北3_403` / `物_505` / `北区2_101`，所以「南核」= 前缀 `南1/南2/南3`、「北核」= `北1–北5`、「物理馆」= `物`。见 `src/core/place.ts`。
-  - 谁踩过：早先「明天南核空教室」被当成「不限楼」，回了一屏北1/北2，`共 590 间`。现在会回 `共 48 间`，标题写清「南核心教学区（南1–南3）」。
-- `campusAssoc` 必须传数字：传字符串 `"2"` 服务端不报错、静默返回 0 条。
-- `roomTypeIds` 默认只查普通教室(1)+多媒体教室(2)：不过滤是 1039 间（多为实验室/办公用房），过滤后 379 间，正好是 `物_505`、`北3_312` 这类真实上课教室。
-- `minSeat` 服务端**忽略**，`seatsForLesson` 也常为 0，所以座位筛选实际只能在客户端做，且多数教室没有座位数据。
-- 耗时随 `pageSize` 线性增长（30→154ms、500→20s），所以用「小页 + 12 路并发」翻页：全校一次约 4s，之后走 60s 缓存。
+---
 
 ## 已知限制（诚实版）
 
-- **成绩 / 考试**：接口通，但大一当前学期无数据（`data: []`），不是实现问题。
-- **通知全文**：教务侧完整 HTML 可得；门户 CMS 的 `content` 被服务端硬截 200 字，官网原文需要登录才能抓，不抓。
-- **空教室**：见上，全校 379 间可上课教室，一次约 4s（并发翻页），之后 60s 缓存；教室座位数基本为空。
-- **模型是可选增强，但「工具循环」有条件**：只有支持 function calling 的服务商才会进 agent 循环（DeepSeek 官方 / 硅基流动 / 百炼 / Moonshot / OpenRouter）；学校那把只有 R1、Open WebUI 不暴露 tools，只能走老的「判意图 + 模板」路径。不填 key 就完全离线。
-- **规则层仍然先跑**：像「明天南核空教室」「今天下午有课吗」「学校最近有比赛吗」这类高频说法，规则层直接命中（几十毫秒），根本不会花模型的钱。
-- **成绩明细（平时分/卷面分）只能「有什么给什么」**：教务的 `/grade/student/grades` 是本号唯一能拿到的成绩接口，返回里带哪些构成分字段由学校决定，不同课还不一样——扩展会按语义（`平时/期中/期末/卷面/usual/midterm/final`…）把它们捞出来展示，但**不能保证每门课都有**。更细的试卷级明细（每道题得分）不在任何接口里。
-- **一卡通的「消费分类统计」做不到**：门户 `getMyECard` 只给余额和最近流水，`getECardDataList` 返回的是一堆深链配置（里面还夹着 `ecard-app.jci.edu.cn` 这种外校残留），**真正的账单明细在 `ecard.v.zzu.edu.cn`，要单独登录**。本号余额 `¥0`、无流水，所以这条只做了「余额 + 有什么流水列什么」，没做分类聚合。
-- **图书馆座位：读得到座位级，下单靠"在你的页面里点"**。座位列表来自 `/v4/Space/seat`，需要那个标签页已登录（`sessionStorage.token`），所以扩展会复用你自己打开的 `order.lib.zzu.edu.cn` 页面；下单接口 `/v4/space/confirm` 的请求体是页面自己用 AES 加密的（key 由时间派生，iv 固定 `ZZWBKJ_ZHIHUAWEI`），我们**不复制这套加密**，而是让页面自己发：长按确认后，content script 在页面上点座位 → 点「立即预约」→ 点确认弹窗，最后按页面有没有出现成功提示如实回报。代价：必须开着那个标签页；该服务只有 **http**、仅校内网可达。
-- **数字编码的座位状态不敢猜**：如果服务端只给 `state: 1/0` 这类数字，扩展不会替你判定"空/占"（猜错会把占着的座位当成空的），会明说"看页面上的绿色座位"。目前实测的映射是 `1=空闲、6=使用中`（写进 `STATUS_NUM`），其它数字仍按未知处理。
-- **座位图是「按坐标自己画的」，不是官方那张**：`/v4/Space/seat` 返回的 `point_x/point_y` 会被还原成一张极简 SVG —— 绿点=空、灰点=已占，**每个空座位都标了座位号**（占用的不标，避免糊成一片），左下角写「空 N / 共 M」。标号会自动在 8 个方位里找空位放，挤不下就不标；鼠标悬停任意圆点仍能看到「001 · 空闲」。没有桌椅、门窗，状态只按 `status_name` 认。
-- **出分监控暂时没数据**：`/grade/student/grades` 本号返回 `[]`（大一当前学期还没出分），所以后台盯梢里"新成绩"这一路目前是空转，等学校出分才会真的弹通知。
-- **通知卡片上的时间/地点是抽出来的，不是接口给的**：两边都没有「活动时间 / 报名截止 / 地点」字段，只能按句子从标题+正文里抽（截止句取最晚、活动句取最早，抽不到就不显示）。门户那条因为服务端只给 200 字，经常抽不到；同一条教务也发了的话，去重时会用全文补上。
-- **截止提醒只对「抽得到日期」的通知生效**：正文里没有 `2026-11-20` / `11 月 5 日` 这类明确日期时就算不出「还剩几天」，卡片上也不会显示截止——宁可少一行，也不猜。
-- **权限**：只申请 15 个域（8 个学校域 + `http://chat.zzu.edu.cn/*` + `http://order.lib.zzu.edu.cn/*` + 5 家模型服务商），不申请 `<all_urls>`；没有自定义 `baseUrl`，所以不需要 `optional_host_permissions` 去弹授权。API 权限是 `storage, alarms, sidePanel, scripting, notifications`——`scripting` 只用来读你自己那个图书馆标签页的 `sessionStorage.token`，`notifications` 只用来弹每日盯梢。
-- **一卡通 / 待办**：接口通，本号余额 `¥0`、待办全 0（确实没消费、没待办）；`message-service` 的未读数接口回 500，未读消息暂不做。
-- **token 存储**：只在 `chrome.storage.local`，不出本机。`X-Id-Token` 等同于登录态，别导出这个扩展的存储。
+**数据本身**
 
-## 为什么不是「抓网页」
+- **成绩**：接口通，但大一当前学期无数据（`data: []`）；构成分（平时/卷面）只能"有什么给什么"，各课字段还不一样，试卷级明细不在任何接口里。
+- **一卡通**：只有余额 + 最近流水；**分类统计做不到**——真正账单在 `ecard.v.zzu.edu.cn`，要单独登录。
+- **通知全文**：教务侧完整 HTML 可得；门户 CMS 的 `content` 被服务端硬截 200 字，官网原文需登录，不抓。
+- **通知的时间/地点/截止是抽出来的**，不是接口给的：抽不到就不显示（宁缺不猜），截止提醒只对正文含明确日期的通知生效。
+- **座位状态**：只认 `status_name`；纯数字编码按未知处理（猜错会把占座当空座）。实测 `1=空闲、6=使用中`。
+- **座位图是自己按坐标画的**，不是官方那张：没有桌椅门窗，只有"绿点空/灰点占 + 空座标号"。
 
-门户和教务都是 uni-app 的 SPA，DOM 里没有稳定语义，且 `nth-child` 类选择器在构建间会漂。这两套系统的 App 与网页共用同一份代码，只靠 `X-Terminal-Info` 区分渠道——也就是说，只要拿到 `idToken`，能做的事和 App 完全一样，还比解析 DOM 稳。详见 `docs/campus-platform-architecture.md`。
+**能力边界**
+
+- **模型**：只有支持 function calling 的服务商能进 agent 循环；学校那把只能判意图。HTTPS 页面调不了学校 AI（混合内容），会就地提示换服务商。
+- **图书馆预约**：必须开着那个已登录的标签页；该站只有 http、仅校内网。我们不复制它的 AES 加密，而是让页面自己发请求。
+- **未读消息**：`message-service` 的未读数接口回 500，暂不做。
+
+**性能**
+
+- 空教室：全校 379 间可上课教室，一次约 4 秒（小页 + 12 路并发），之后 60 秒缓存。
+- 座位图：216 座约 20 KB 的 SVG（data URI），只在出图时生成。
+
+---
+
+## 开发
+
+```powershell
+npm run typecheck     # tsc --noEmit
+npm test              # 离线单测（用 test/fixtures 的真实响应快照，已脱敏）
+npm run build         # 扩展 + PWA 一起构建到 dist/
+npm run verify        # typecheck + test + build
+npm run e2e           # 真浏览器：起 Edge + 加载 dist/，用 CDP 跑面板与各工具
+npm run pwa:shot      # 无头 Edge + 390×844 移动视口跑一遍 PWA，出 .pwa-*.png
+npm run test:live     # 实网：读 tmp/zzu/*.txt 里的 token（见下）
+npm run pwa:serve     # 本地起 http://127.0.0.1:8899 看 PWA
+```
+
+实网测试需要你自己的登录态，放在仓库根下 `tmp/zzu/`（已在 `.gitignore`）：
+
+```
+tmp/zzu/jwxt-token.txt   教务 X-Id-Token
+tmp/zzu/token.txt        门户 userToken（可缺）
+tmp/zzu/chat-key.txt     模型 sk- key（可缺）
+```
+
+**Windows 沙箱里的三个坑**（普通机器不遇到）：`npm install` 可能因缓存目录权限报 `EPERM`，需要 `$env:npm_config_cache = "<仓库>\.npm-cache"`；lifecycle 脚本可能 `spawn EPERM`，用 `--ignore-scripts`；`npx tsc` 会去 registry 下 `tsc` 包，所以稳妥写法是直接跑入口文件：`node node_modules/typescript/lib/tsc.js`、`node node_modules/vitest/vitest.mjs`、`node node_modules/vite/bin/vite.js`。
+
+### 目录
+
+```
+src/core/            与环境无关的纯逻辑（node 可单测，扩展与 PWA 共用）
+  http.ts            统一请求头、三种信封拆包、ApiError
+  jwt.ts             JWT 解码、claims → 用户信息与过期
+  portal.ts          门户 portal-api：事件、节次、教学周、CMS 通知、一卡通
+  jwxt.ts            教务 eams-door / eams-micro-server：学期、课表、成绩、教室、培养方案
+  library.ts         图书馆免登录余量 + 座位图宽容解析 + SVG 平面图
+  libtab.ts          和图书馆页面里的 content script 通信
+  services.ts        缓存 + 降级（教务优先，无教务时用门户反推）
+  tools.ts           14 个工具（schema + run）
+  toolspec.ts        给模型看的 tools JSON Schema（手写，描述即提示词）
+  intent.ts          规则意图（L0）
+  place.ts           地点词 → 教室名前缀（南核 = 南1/南2/南3）
+  walk.ts            楼间步行时间表
+  study.ts           自习决策器（时长 + 距离 + 可用窗口）
+  watch.ts           每日盯梢：新成绩 / 临近截止
+  remind.ts          课前提醒分块（连堂课并成一条）
+  notice*.ts         通知卡片：分类词表、时间/地点抽取、去重、已读
+  llm.ts             六家服务商 + 判意图 + function calling 循环
+  agent.ts           ask() → 规则优先 → agent 循环 / 判意图
+  render.ts          模板回答（无模型兜底）
+  ics.ts             课表 → RFC 5545
+  kv.ts / storage.ts 存储抽象（chrome.storage / localStorage）+ 同步码
+src/ui/              面板与 PWA 共用组件（markdown、地图、模型设置、通知卡、长按确认）
+src/background/      service worker：消息路由、side panel、alarms
+sidepanel/           Preact 侧边栏
+pwa/                 Preact 手机版（manifest 与 sw 在 public/pwa/）
+public/              manifest.json + content scripts（原生 JS，不经构建）+ 图标 + PWA 清单
+test/                vitest；fixtures 是脱敏后的真实响应
+scripts/             e2e / pwa-shot / serve-pwa / capture / probe-*（接口逆向用）
+mobile/android/      安卓壳（Gradle，零第三方依赖）
+```
+
+---
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/campus-platform-architecture.md](docs/campus-platform-architecture.md) | 为什么"网页和 App 是一套东西"、idToken 鉴权链、三层结构 |
+| [docs/campus-site-probe.md](docs/campus-site-probe.md) | 接口实测清单与探针方法（逆向用） |
+| [docs/portal-services-inventory.md](docs/portal-services-inventory.md) | 22 项门户服务的"能接 / 不能接"盘点 |
+| [docs/notice-hub.md](docs/notice-hub.md) | 通知卡片规则：六类分类、时间地点抽取、今日口径 |
+| [docs/campus-layer-v0.2.md](docs/campus-layer-v0.2.md) | 设计说明与验收记录（含每次实测数字） |
+| [docs/deploy-pwa.md](docs/deploy-pwa.md) | 静态托管三种放法与自检 |
+
+---
+
+## 许可
+
+[MIT](LICENSE)。代码随便用；但**不含**任何学校的版权素材（地图、校徽等都不在仓库里）。
+
+非官方项目，与郑州大学及超星/树维等厂商无隶属关系。它查的是**你自己的账号、你自己的数据**。
+接口随时可能变——坏了就按 [docs/campus-site-probe.md](docs/campus-site-probe.md) 的方法重新探。
+
+## 贡献
+
+欢迎 PR，三条要求：
+
+1. 别提交任何 token、`sk-` key、学号姓名、未脱敏的原始响应。
+2. 新增能力前先读 [docs/portal-services-inventory.md](docs/portal-services-inventory.md)——哪些服务现实中接不上、为什么。
+3. 跑一遍 `npm run verify`；能动 UI 的话再跑 `npm run e2e` 与 `npm run pwa:shot`。
