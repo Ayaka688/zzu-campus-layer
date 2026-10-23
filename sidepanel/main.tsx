@@ -3,6 +3,19 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { LlmFields } from '../src/ui/llm-fields';
 import { HoldButton } from '../src/ui/hold';
 import { CampusMap, RichText, download } from '../src/ui/rich';
+import { NoticeBoard, NoticeTodayCard } from '../src/ui/notice';
+import { noticesToIcs } from '../src/core/ics';
+import type { NoticeCard, TodayDigest } from '../src/core/notice';
+import { NOTICE_CATEGORIES, type NoticeCategory } from '../src/core/noticeRules';
+import {
+  DEFAULT_NOTICE_PREFS,
+  getNoticePrefs,
+  markNoticeRead,
+  setNoticePrefs,
+  takeNoticeFocus,
+  type NoticePrefs,
+} from '../src/core/noticeStore';
+import { todayShanghai } from '../src/core/util';
 import './style.css';
 
 interface TokenStatus {
@@ -44,6 +57,7 @@ const QUICK: Array<{ label: string; text: string }> = [
   { label: '本周课表', text: '这周课表' },
   { label: '明天有课吗', text: '明天有课吗' },
   { label: '今天空教室', text: '今天上午的空教室' },
+  { label: '今天有什么讲座', text: '今天有什么讲座' },
   { label: '最新通知', text: '最近的通知' },
   { label: '导出日历', text: '把课表导出成日历' },
 ];
@@ -67,6 +81,16 @@ function App() {
   const [bundle, setBundle] = useState('');
   const [bundleBusy, setBundleBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  /** 'chat' = 问答，'notices' = 通知时间线。同一个面板里切换，不新开窗口。 */
+  const [view, setView] = useState<'chat' | 'notices'>('chat');
+  const [noticeCards, setNoticeCards] = useState<NoticeCard[]>([]);
+  const [noticeDigest, setNoticeDigest] = useState<TodayDigest | null>(null);
+  const [noticeBusy, setNoticeBusy] = useState(false);
+  const [noticeError, setNoticeError] = useState('');
+  const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
+  /** 从系统通知点进来的那张卡：切到时间线并高亮 */
+  const [focusId, setFocusId] = useState('');
+  const [today] = useState(todayShanghai());
   const bottom = useRef<HTMLDivElement | null>(null);
 
   async function refreshStatus() {
@@ -74,8 +98,60 @@ function App() {
     if (res.ok && res.data) setStatuses(res.data);
   }
 
+  /**
+   * 拉通知：直接复用 find_notices（分类/抽取/去重都在 core 里做过）。
+   * 一次拿 50 条，之后 tab/搜索全在本地筛，切 tab 不再打接口。
+   */
+  async function loadNotices(): Promise<void> {
+    if (noticeBusy) return;
+    setNoticeBusy(true);
+    setNoticeError('');
+    try {
+      const res = await send<{ text: string; data?: { cards?: NoticeCard[]; digest?: TodayDigest } }>({
+        type: 'tool',
+        tool: 'find_notices',
+        args: { limit: 50 },
+      });
+      const payload = res.ok ? res.data?.data : undefined;
+      if (payload) {
+        setNoticeCards(payload.cards ?? []);
+        setNoticeDigest(payload.digest ?? null);
+      } else {
+        setNoticeError(res.error ?? '没拉到通知');
+      }
+    } catch (e) {
+      setNoticeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setNoticeBusy(false);
+    }
+  }
+
+  /** 教务通知没有公开链接，读全文走 background 回查（返回纯文本，HTML 不进 DOM）。 */
+  async function loadNoticeDetail(card: NoticeCard): Promise<string | null> {
+    const res = await send<{ id: string; title: string; text: string }>({ type: 'notice:detail', id: card.id });
+    return res.ok && res.data ? res.data.text : null;
+  }
+
+  function saveNoticeIcs(card: NoticeCard): void {
+    const ics = noticesToIcs([card]);
+    download(`通知-${card.deadline ?? card.eventStart ?? today}.ics`, ics);
+  }
+
+  async function readNotice(id: string): Promise<void> {
+    setNoticePrefsState(await markNoticeRead(id));
+  }
+
+  async function toggleCategory(category: NoticeCategory): Promise<void> {
+    const current = noticePrefs.categories.length > 0 ? noticePrefs.categories : [...NOTICE_CATEGORIES];
+    const next = current.includes(category) ? current.filter((item) => item !== category) : [...current, category];
+    // 空数组的语义是「全订阅」，所以不允许把最后一个取消掉
+    if (next.length === 0) return;
+    setNoticePrefsState(await setNoticePrefs({ categories: next.length === NOTICE_CATEGORIES.length ? [] : next }));
+  }
+
   useEffect(() => {
     void refreshStatus();
+    void getNoticePrefs().then(setNoticePrefsState);
     void send<LlmSettings>({ type: 'settings:get' }).then((res) => {
       if (res.ok && res.data) {
         setSettings(res.data);
@@ -94,6 +170,30 @@ function App() {
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
+
+  // 登录态一到位就顺手拉一次通知（今日卡片要显示），否则等用户点「通知」再拉
+  const ready = statuses.some((s) => (s.source === 'jwxt' || s.source === 'portal') && s.valid);
+  useEffect(() => {
+    if (ready) void loadNotices();
+  }, [ready]);
+
+  // 从系统通知点进来：background 先把目标写进存储，这里取走并跳过去；
+  // 面板已经开着时走 runtime 消息，直接切视图。
+  useEffect(() => {
+    void takeNoticeFocus().then((id) => {
+      if (!id) return;
+      setView('notices');
+      setFocusId(id);
+    });
+    const onMessage = (message: unknown) => {
+      const msg = message as { type?: string; id?: string };
+      if (msg?.type !== 'notice:focus') return;
+      setView('notices');
+      if (msg.id) setFocusId(msg.id);
+    };
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => chrome.runtime.onMessage.removeListener(onMessage);
+  }, []);
 
   async function submit(text: string) {
     const question = text.trim();
@@ -215,6 +315,23 @@ function App() {
       <header>
         <h1>校园信息层</h1>
         <button
+          class={`gear${view === 'notices' ? ' on' : ''}`}
+          style={{ right: '42px' }}
+          title={view === 'notices' ? '回到问答' : '通知时间线'}
+          aria-label={view === 'notices' ? '回到问答' : '通知时间线'}
+          onClick={() => {
+            if (view === 'notices') {
+              setView('chat');
+              return;
+            }
+            setView('notices');
+            setFocusId('');
+            if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
+          }}
+        >
+          {view === 'notices' ? '💬' : '🔔'}
+        </button>
+        <button
           class={`gear${settingsOpen ? ' on' : ''}`}
           title="设置"
           aria-label="设置"
@@ -268,7 +385,28 @@ function App() {
         </section>
       )}
 
-      <main>
+      {view === 'notices' ? (
+        <main class="notices-main">
+          <NoticeBoard
+            cards={noticeCards}
+            digest={noticeDigest}
+            prefs={noticePrefs}
+            today={today}
+            loading={noticeBusy}
+            error={noticeError}
+            onRefresh={() => void loadNotices()}
+            onRead={(id) => void readNotice(id)}
+            onIcs={saveNoticeIcs}
+            onDetail={loadNoticeDetail}
+            onToggleCategory={(category) => void toggleCategory(category)}
+            focusId={focusId}
+          />
+        </main>
+      ) : (
+        <main>
+          {noticeDigest && (
+            <NoticeTodayCard digest={noticeDigest} loading={noticeBusy} onOpen={() => setView('notices')} />
+          )}
         {messages.length === 0 && (
           <div class="empty">
             <p>在下面问点实际的，例如：</p>
@@ -362,32 +500,37 @@ function App() {
         )}
         <div ref={bottom} />
       </main>
+      )}
 
-      <div class="quick">
-        {QUICK.map((q) => (
-          <button key={q.label} onClick={() => void submit(q.text)} disabled={busy}>
-            {q.label}
-          </button>
-        ))}
-      </div>
+      {view === 'chat' && (
+        <>
+          <div class="quick">
+            {QUICK.map((q) => (
+              <button key={q.label} onClick={() => void submit(q.text)} disabled={busy}>
+                {q.label}
+              </button>
+            ))}
+          </div>
 
-      <form
-        class="composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit(input);
-        }}
-      >
-        <input
-          value={input}
-          onInput={(e) => setInput((e.target as HTMLInputElement).value)}
-          placeholder="问点什么，比如「明天下午有空的教室吗」"
-          autoFocus
-        />
-        <button type="submit" disabled={busy || !input.trim()}>
-          发送
-        </button>
-      </form>
+          <form
+            class="composer"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit(input);
+            }}
+          >
+            <input
+              value={input}
+              onInput={(e) => setInput((e.target as HTMLInputElement).value)}
+              placeholder="问点什么，比如「明天下午有空的教室吗」"
+              autoFocus
+            />
+            <button type="submit" disabled={busy || !input.trim()}>
+              发送
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 }

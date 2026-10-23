@@ -203,8 +203,12 @@ export async function importTokenBundle(bundle: TokenBundle): Promise<TokenStatu
 export interface WatchState {
   /** 上次看到的成绩指纹（新出分靠它比较） */
   gradeFp?: string;
-  /** 上次推送的日期（一天只推一次） */
+  /** 上次推送的日期（用来判断「今天是否已经推过」与「跨天重置」） */
   notifiedOn?: string;
+  /** 今天已经提醒过哪些截止（卡片 id）——同一天新出现别的截止还会补推，同一条不会重复 */
+  notifiedIds?: string[];
+  /** 今天已经推了几次（每天有上限，免得 6 小时一次变骚扰） */
+  pushesOn?: number;
 }
 
 const WATCH_KEY = 'watch';

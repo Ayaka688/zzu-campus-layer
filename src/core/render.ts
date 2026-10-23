@@ -1,4 +1,4 @@
-import { Card, CardTx, Course, FreeRoom, Grade, Notice, Occupancy, Term, TodoSummary } from './types';
+import { Card, CardTx, Course, FreeRoom, Grade, Occupancy, Term, TodoSummary } from './types';
 import type { PlanProgress } from './jwxt';
 import type { LibrarySeats } from './library';
 import { renderSeatMap } from './library';
@@ -96,18 +96,6 @@ export function renderFreeRooms(
   if (list.length > limit) {
     rows.push('', `…共 ${list.length} 间符合条件的，先列前 ${limit} 间。`);
     rows.push('换个说法能筛：加「南核」「北1」「物理馆」限定楼，或「只看自习室」。');
-  }
-  return rows.join('\n');
-}
-
-export function renderNotices(notices: Notice[], keyword?: string): string {
-  if (notices.length === 0) return keyword ? `没有匹配「${keyword}」的通知。` : '没有通知。';
-  const rows = [keyword ? `**匹配「${keyword}」的通知**` : '**最新通知**', ''];
-  for (const n of notices) {
-    const meta = [n.department, n.publishedAt?.slice(0, 16), n.readCount !== undefined ? `${n.readCount} 阅读` : '']
-      .filter(Boolean)
-      .join(' · ');
-    rows.push(`- **${n.title}**${meta ? `\n  ${meta}` : ''}${n.summary ? `\n  ${n.summary.slice(0, 120)}` : ''}`);
   }
   return rows.join('\n');
 }

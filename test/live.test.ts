@@ -83,7 +83,7 @@ describe.skipIf(!enabled)('实网回归（郑大）', () => {
 
     // ① 「学校最近有比赛吗」：不能只回「没有匹配」，要按话题词扩同义词去搜
     const race = await ask('学校最近有比赛吗', base);
-    expect(race.tool).toBe('search_notice');
+    expect(race.tool).toBe('find_notices');
     expect(race.text.length).toBeGreaterThan(20);
     expect(race.text).not.toBe('没有匹配「比赛」的通知。');
 

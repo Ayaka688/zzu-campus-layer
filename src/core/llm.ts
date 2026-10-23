@@ -426,7 +426,10 @@ export function parseIntentsJson(raw: string): Intent | null {
   if (!tool) return null;
   // 模型爱把没用到的参数写成 null（DeepSeek-R1 尤其），先剥掉再收敛类型。
   const args = coerceArgs(check.data.args ?? {});
-  const schema = (TOOLS[tool as keyof typeof TOOLS] as { schema: z.ZodType<unknown> }).schema;
+  const def = TOOLS[tool as keyof typeof TOOLS] as { schema: z.ZodType<unknown> } | undefined;
+  // 模型可能编一个不存在的工具名（老提示词里出现过的 search_notice 之类），别让这里崩
+  if (!def) return null;
+  const schema = def.schema;
   const first = schema.safeParse(args);
   if (first.success) return { tool: tool as Intent['tool'], args: args, reason: 'LLM 判定' };
   const fallback = schema.safeParse({});
@@ -448,7 +451,9 @@ function buildSystemPrompt(today: string): string {
     '- get_schedule：课表。args: { week?: number(1-20), day?: "today"|"tomorrow"|1-7 }',
     '- find_free_room：空教室/自习室。args: { date?: "YYYY-MM-DD", sections?: number[], minSeats?: number,' +
       ' campus?: string, building?: string }；building 填用户说的地点原词（南核 / 北核 / 北1 / 物理馆 / 材料馆）',
-    '- search_notice：通知公告。args: { keyword?: string, limit?: number }',
+    '- find_notices：通知卡片（讲座/比赛/活动/会议/教务/生活）。args: { category?: "lecture"|"competition"|"activity"|"meeting"|"academic"|"life",' +
+      ' topic?: string（教务子类：选课/考试/成绩/学籍/毕业/实习…）, keyword?: string, withinDays?: number(0-365),' +
+      ' sort?: "published"|"deadline" }',
     '- get_grades：成绩/绩点。args: {}',
     '- get_exams：考试安排。args: {}',
     '- export_ics：导出日历。args: { fromWeek?: number }',
