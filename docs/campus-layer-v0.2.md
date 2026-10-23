@@ -28,27 +28,45 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 | 14 | 成绩/考试「无入口」 | **可用**：`/grade/student/grades`、`/exam/student/exam`（本账号当前为空） | 微前端 `eams-student-grade-app` / `eams-exam-student-app` |
 | 15 | M2「真实站点逆向 3–4 人日」 | 已完成，不再计入工期 | 本仓库 |
 
-## 2. 架构（v0.2）
+## 2. 架构（v0.2.3：模型当执行核心，2026-10-22）
 
 ```
-用户一句话
+用户一句话（可带最近 3 轮 history）
    │
-   ├─ intent.parseIntent(text, today)      L0 规则，命中即出 {tool,args}
-   │     └─ 未命中 → 若开启 L1 且配了 key → llm.classifyIntent()
-   │                              └─ 模型只回 {tool,args}，仍要过工具 zod
+   ├─ intent.parseIntent(text, today)      L0 规则，命中即出 {tool,args}（几十毫秒、离线可用）
+   │     └─ 未命中 → 若开启模型且配了 key：
+   │           ├─ 服务商支持 function calling → agent.runAgent() 循环
+   │           └─ 不支持（学校 R1）        → llm.classifyIntent() 只给 {tool,args}
    │
    ├─ tools.runTool(name, args, svc)       zod 校验参数 → 调服务
+   │     └─ agent 模式：结果以 {text,data} JSON 回灌给模型，模型再决定「继续调工具」或「回答」
    │
    ├─ services.CampusService               5 分钟 TTL 缓存
    │     ├─ jwxt（优先）: 学期/课表/教室/成绩/考试/通知
    │     └─ portal（降级）: 课表事件 + 节次表 + CMS 通知
    │
-   └─ render.*                             Markdown 模板作答（无模型）
+   └─ render.*                             模板作答（无模型 / 学校 R1 走这条）
 ```
 
-L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩成服务商表）：统一 OpenAI 兼容 `/chat/completions`，预设六家 —— 学校自建 Open WebUI（`http://chat.zzu.edu.cn/api`，模型 id `DeepSeek-R1`，用 `sk-` API Key 而非 CAS token，仅校园网 + 仅 http）+ DeepSeek 官方 / 硅基流动 / 阿里百炼 / Moonshot / OpenRouter（自带 key，HTTPS 页面可用）。默认关闭，在 `⚙`（面板或手机版）里选服务商填 key 才启用。
+**为什么改（2026-10-22）**：此前模型只是「语义解释层」，只负责把话翻成 `{tool,args}`，正文由模板渲染。三个真实失败案例暴露了这条路的天花板：「学校最近有比赛吗」→ 回「没有匹配的通知」（同义词不扩、话题词不认）；「今天下午我有课吗」→ 把整天课表倒出来（无时段概念）；「预约明天图书馆一楼随便一个位置」→ 匹配成「图书馆 馆藏检索」（把预约当成检索）。这些都不是「模型笨」，是「模板 + 参数」这一层太窄。
 
-**模型不止判意图（2026-10-21 晚改）**：同一次请求里，模型要么给 `{"tool":…}`，要么直接用中文回答（问候、自我介绍、怎么用、一般常识）。`parseModelReply` 认纯文本与 `{"reply":…}` 两种；`agent.ts` 把自由回答标成 `via:'llm-chat'`（界面徽标「由模型回答」），只有模型既不判工具也不说话时才回落到 `helpText`。为什么改：原先问「hello」只会甩一屏能力清单，用户判断不了是「坏了」还是「不认」。代价是每条未命中的话都要过一次模型（R1 11–25s，`deepseek-chat` 约 1s）。
+**现在的分层**（`src/core/agent.ts`）：
+
+| 层 | 职责 | 谁做 |
+| --- | --- | --- |
+| 事实层 | 数据只来自学校接口 | `services.ts` / `jwxt.ts` / `portal.ts` |
+| 动作层 | 10 个工具，参数由 zod 校验 | `tools.ts`（规格在 `toolspec.ts`） |
+| 编排层 | 决定调哪个工具、几轮、怎么讲 | 支持 function calling 的模型（`runAgent`，最多 4 步） |
+| 兜底层 | 模型不可用时的规则与模板 | `intent.ts` + `render.ts` |
+
+关键护栏：
+
+- **相对日期不许模型算**：`applyTextHints()` 在调工具前用用户原话覆盖 `date`/`day`（「后天」=+2 天，「下午」补 5-8 节）。实测 R1 会把「后天」算成明天。
+- **工具返回即事实**：提示词写死「只使用工具返回的内容，不许编数字/课程名/通知标题」。
+- **不可代做的操作只能给入口**：预约、报名一律用 `open_service` 给官方链接，并禁止假装成功。
+- **未知工具回错误让它自纠**：模型调 `book_seat` 这种不存在的工具时，回 `{"error":"没有叫 book_seat 的工具，可用：…"}`，模型下一轮自己改口。
+
+规则层同时被强化（离线也生效）：`get_schedule` 加 `period`（上午/下午/晚上）、`search_notice` 收 `query` 并按 `SYNONYMS` 扩同义词（比赛→竞赛/大赛/挑战杯/创新创业/选拔赛）、`matchServices` 同分时按命中字面长度排序（「图书馆一楼」压过「图书馆」）。
 
 数据红线不变：模型永远不生成课表/成绩/通知正文，这些只来自学校接口 + 模板渲染。
 
@@ -96,19 +114,23 @@ L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩
 
 要点：`weeks` 是**教学周序号**而非自然周；`startTime/endTime` 统一 `HH:mm` 串（服务端给 `800`/`08:00:00` 两种，入口处归一）；`source` 保留来源便于 UI 标注可信度。
 
-## 5. 工具集（v0.2.2，10 个）
+## 5. 工具集（v0.2.6，14 个）
 
 | 工具 | 参数（zod） | 语义 |
 | --- | --- | --- |
-| `get_schedule` | `{week?: int 0–30, day?: 'today'\|'tomorrow'\|1–7}` | 默认当前教学周；按天过滤 |
+| `get_schedule` | `{week?: int 0–30, day?: 'today'\|'tomorrow'\|1–7, period?: 'morning'\|'afternoon'\|'evening'}` | 默认当前教学周；按天/时段过滤，指定了却没课时明说「没有课」 |
 | `find_free_room` | `{date?: YYYY-MM-DD, campus?, building?, minSeats?, sections?: int[1–20], limit?}` | 全部教室 − 当天占用；`sections` 要求全闲；`building` 走教室名前缀（南核=南1–南3、北核=北1–北5、物理馆=物） |
-| `search_notice` | `{keyword?, limit?}` | 标题+摘要匹配；教务处通知全文、门户 200 字摘要 |
-| `get_grades` | `{}` | 成绩/绩点 |
+| `search_notice` | `{query?, keyword?, days?, limit?}` | 标题+摘要匹配；`query` 会做同义词扩词（比赛→竞赛/大赛/挑战杯…），零命中时列最近 5 条 |
+| `get_grades` | `{course?: string}` | 成绩/绩点；按课程名过滤，并按语义把构成分（平时/期中/期末/卷面…）列出——有没有取决于服务端字段 |
 | `get_exams` | `{}` | 考试安排，空则明说 |
 | `get_plan_progress` | `{code?: string}` | 培养方案学分进度：按模块列要求/已通过/在修/还差 + 未修课程清单（默认 `code='01'` 主修） |
 | `open_service` | `{keyword: string}` | 门户服务直达：从 19 项服务里匹配，返回说明 + 官方 URL（面板渲染成可点按钮） |
 | `get_card` | `{}` | 一卡通余额 + 最近消费/充值（门户 `/v2/personalData/getMyECard`） |
 | `get_todos` | `{}` | 待办/在办/待申请计数，紧急与超时单列，附第一条事项的办理入口 |
+| `library_seats` | `{date?: YYYY-MM-DD}` | 图书馆**实时空座**（各馆空闲/总数 + 楼层明细，免登录 `order.lib.zzu.edu.cn/v4/space/pcTopFor`）+ 选座直达链接 |
+| `library_seat_map` | `{areaId, date}` | **座位级**空闲（`/v4/Space/seat`，需那个标签页已登录）：宽容解析（字段名不假设），数字状态不硬猜 |
+| `book_library_seat` | `{areaId, date, seatNo}` | **只产出待确认动作**（`data.action.kind='library-book'`），面板渲染成**长按 1.2s** 才提交的按钮；执行在用户自己的图书馆页面上点选（不复制站点的 AES） |
+| `find_study_spot` | `{date?, needMinutes? (默认 120), near?, maxWalkMin?}` | **自习决策器**：教室连续空闲窗口（`freeWindows`）+ 图书馆余量合成一个答案，按时长/步行（`walk.ts` 楼间表）排序；凑不够时长会分级说明 |
 | `export_ics` | `{fromWeek?, toWeek?}` | 生成 `.ics`，带 `Asia/Shanghai` 与 VTIMEZONE |
 
 > **跨域 token 的实测结论**：教务那张 30 天 `idToken` 在 `portal-api` / `transaction` 上同样有效（同一 CAS 签发、受众相同），
@@ -146,6 +168,9 @@ L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩
 | 校区作息表 | ✅ | `/eams-door/api/v1/calendar/get-campus-layout-table` | 35,278B / 10 条，含校区与作息模板（v0.3） |
 | 一卡通余额 | ✅ 已接（用教务票） | `/portal-api/v2/personalData/getMyECard` | 余额是字符串 `"0"`；卡类型 `uni-app`；流水为空 |
 | 待办（事务中心） | ✅ 已接 | `/ttc/v1/count/ttcCount?readed=0` + `/ttc/api/ttc/center-list/getToDoList` | 本号全 0；`message-service` 未读数接口回 500，暂不做 |
+| 图书馆实时空座 | ✅ 已接（免登录） | `POST http://order.lib.zzu.edu.cn/v4/space/pcTopFor` | 主校区 2527 总 / 约 930 空闲；**只有 http、仅校内网**；返回里只给主校区一个馆 |
+| 图书馆座位图/下单 | ❌ 需登录 | `/v4/Space/map`、`/v4/space/confirm` | 回 `{"code":10001,"message":"您尚未登录"}`；`/v4/index/bookingRules` 原文：账号密码与统一身份认证一致（学号+密码），扩展不碰密码 |
+| 一卡通账单明细/分类 | ❌ 接口没有 | `/v1/personalData/getECardDataList` | 只回深链配置（`getScanInfo` 指向外校 `ecard-app.jci.edu.cn` 残留），真账目在 `ecard.v.zzu.edu.cn`，需单独登录 |
 
 ## 7. 鉴权（v0.2 主路径）
 
@@ -197,6 +222,11 @@ L1 已在 `campus-layer/src/core/llm.ts` 落地（2026-10-21，2026-10-21 晚扩
 | 12 | 扩展同步码 + e2e 加固（2026-10-21） | `bundle:export` 从面板发出 → 3,496 字符码，解回 `{v,jwxt,portal,at}`（jwxt 1,298 字符、含门户票）；顺手修了 e2e 的一个真 bug：token 不再写进 SW target（`Runtime.evaluate` 打到已休眠的 SW 会报 `chrome is not defined`），改成在扩展页面里写并 `Page.reload`，失败路径也会 kill 掉 Edge 不再挂住端口 |
 | 13 | 服务商预设 + 相对路径（2026-10-21） | `tsc` 0 错、**101 passed / 9 skipped**；`vite build` 产物 `dist/pwa/{index.html,pwa-sw.js,pwa.webmanifest}` 且 HTML 全引用 `../assets/…`（子路径可部署）；`pwa-shot` 绿（L1 徽标「由模型判定」、2026-10-23 空教室）；`e2e` 绿（10 工具、`settings inputs:3`、`bundle:llm {provider:"school", model:"DeepSeek-R1"}`、L1 `15.6s via:llm`）；新增 4 条 `llm.test.ts` 用例（换服务商改地址、未知回落学校、402/429 文案、HTTPS+http 服务商直接放弃） |
 | 14 | 地点词 + 模型自由回答（2026-10-21 深夜） | ①`src/core/place.ts`：南核→南1–南3、北核→北1–北5、物理馆→物，按教室名前缀过滤（不用不透明的 `buildingIds`）。实网 `ask('明天南核空教室')` → `count 48`，全部 `^南[123]_`；`e2e` 新增断言 `south-core {"hasSouth":true,"leakedNorth":false}`，标题「2026-10-22 空教室 · 南核心教学区（南1–南3）」。②`parseModelReply` + `via:'llm-chat'`：问「hello」由模型直接作答（徽标「由模型回答」），不再甩能力清单。`tsc` 0 错、**134 passed / 10 skipped**、live 10/10（含新用例）、`e2e` 与 `pwa-shot` 全绿 |
+| 15 | 模型当执行核心（2026-10-22） | ①`toolspec.ts` 手写 10 个工具的 OpenAI tools Schema；`llmChatWithTools` 走 `tool_choice:'auto'`；`agent.runAgent` 最多 4 步、工具结果以 `{text,data}` 回灌、未知工具回错误自纠、`maxSteps` 用完用最后结果兜底。②`applyTextHints` 用用户原话覆盖相对日期与时段（不信模型算日期）。③规则层同步强化：`get_schedule.period`、`search_notice.query` + `SYNONYMS` 扩词、`matchServices` 同分按命中长度排序。④三个原失败说法现在（**不接模型**）即通过：`学校最近有比赛吗` → 4 条真实竞赛通知（AI 智能体大赛 / 市场调查与分析大赛 / 文博创意选拔赛 / 创新创业大赛决赛）；`今天下午我有课吗` → 只回 14:00-15:40 计算学科导论；`预约明天图书馆一楼随便一个位置` → `open_service` 座位预约 `order.lib.zzu.edu.cn`。⑤`tsc` 0 错、**158 passed / 11 skipped**、live **11/11（13.3s）**、`e2e` 全绿（10 工具 + south-core + bundle 断言）、`vite build` 通过（`llm-*.js` 86.92 kB / gzip 26.10）；**真模型（deepseek-chat）实网未验**（本机无可用 key），工具循环逻辑只在单测里用桩响应验证 |
+| 16 | 三个新痛点：成绩按课查 / 图书馆座位 / 一卡通分类（2026-10-22） | ①`get_grades` 加 `course?`，`renderGrades` 按语义捞构成分（`平时|期中|期末|卷面|usual|midterm|final`…），零命中时列出已出分课程；规则层 `extractCourseName` 支持「高数多少分」。②新增 `library_seats` 工具 + `src/core/library.ts`：`POST http://order.lib.zzu.edu.cn/v4/space/pcTopFor` **免登录**拿到各馆实时空闲/总数（实测主校区 929–934 / 2527，37%），渲染成「空闲/总数 + 百分比 + 合计」并给选座直达链接；座位图 `/v4/Space/map` 与下单 `/v4/space/confirm` 回 `您尚未登录`，登录凭据就是统一身份认证的学号+密码，**扩展不碰**。③一卡通分类统计**判定做不到**：`getECardDataList` 只回深链配置、真账目在 `ecard.v.zzu.edu.cn` 需单独登录，已写进 README 限制。④意图：「图书馆还有位置吗」走 `library_seats`，「南核空教室」仍走 `find_free_room`（新增 12 例 `test/library.test.ts` 覆盖，含「不被图书馆规则抢走」）。⑤`tsc` 0 错、**170 passed / 12 skipped**、live **12/12（10.6s，含图书馆用例）**、`e2e` 全绿（11 工具，`library_seats` 60ms）、`vite build` 通过；`manifest.host_permissions` 9→15（新增 `http://order.lib.zzu.edu.cn/*`） |
+| 17 | 图书馆座位级 + 长按确认（2026-10-22） | 新增 library_seat_map（读 /v4/Space/seat，宽容解析、数字状态不猜）与 book_library_seat（只产出待确认动作，面板长按 1.2s 才提交，执行在用户自己的图书馆页面里点选，不复制站点 AES）；新增 public/content/library.js（第 4 个 content script）与 src/ui/hold.tsx；工具 11→13，host 仍是 15 条（复用同一域）；单测 171→179 passed / 12 skipped，tsc 0 错、vite build 通过；**真实下单未由我验证**（会占用户座位）。 |
+| 18 | 座位级取数打通（2026-10-22/23） | ①根因不是 https/TLS：在已登录标签页里用页面同款请求实测 `POST /v4/Space/seat {id:'3', day:'2026-10-23', label_id:[], start_time:'07:30', end_time:'22:30', begdate:'', enddate:''}` → `code 0 / 216 座位 / free_num 123`；空数组的真因是**模型自己填了 areaId=2**，且日期字段是 `day` 不是 `date`。②`libtab.readLibrarySeats` 改成后台直连：`chrome.scripting.executeScript` 读出该标签页 `sessionStorage.token`，后台 `fetch` 带 `authorization: 'bearer'+token`，候选 areaId 轮试 `[模型给的, '3','4','5','6']`，拿到非空座位表才算命中（manifest 加 `scripting`）。③`library.parseSeatMap` 按真实字段收敛：`seatNo` 取 `no`、状态取 `status_name`，`STATUS_NUM` 记 `1=空闲/6=使用中`，fixture 取真实响应 6 条（`total_num:216`、`free_num:58`）。④结果：`tsc` 0 错、**187 passed / 12 skipped**、`vite build` 通过；用户实测成功（列出 216 个座位 / 空 123 / `001-007`、`010-013`…，并出现「长按预约 001」按钮）。 |
+| 19 | 连坐时长 / 自习决策器 / 每日盯梢（2026-10-23） | ①`walk.ts`：15 个楼座相对坐标 + `buildingOf`/`walkMinutes`（78 m/min），`services.freeWindows` 把占用取补集、丢掉 <20 分钟碎片，`FreeRoom` 带 `windows/longestMin/freeNowMin`，渲染成「08:00–12:00，现在就能坐 2 小时 40 分」。②`study.ts` + `find_study_spot`（第 14 个工具）：教室与图书馆合成一个入口，按时长/步行排序；`intent.STUDY_FIRST` 命中「自习/看书/刷题」但**不含具体节次**才走它。③`watch.ts` + `daily-watch` 闹钟（6h 周期、一天只跑一次）：`gradeFingerprint` 比对出新成绩、`dueItems` 抓 7 天内截止的报名/申请通知，用 `chrome.notifications` 弹（manifest 加 `notifications`）。④结果：`tsc` 0 错、**216 passed / 12 skipped**、live 12/12、`vite build` 通过；实测两个空：成绩接口 `data:[]`（大一未出分）、教务通知正文被压成标题（无日期），故这两路目前空转。 |
 
 ## 9.1 移动端（PWA，2026-10-21 追加）
 
