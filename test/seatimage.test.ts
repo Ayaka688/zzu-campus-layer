@@ -88,3 +88,47 @@ describe('真实一楼大厅 216 个座位', () => {
     expect(Number(m[2])).toBeLessThanOrEqual(560);
   });
 });
+
+describe('标号（只标空座位）', () => {
+  const raw = JSON.parse(readFileSync(new URL('./fixtures/library-seat-full.json', import.meta.url), 'utf8'));
+  const map = parseSeatMap(raw);
+  const freeNos = new Set(map.seats.filter((s) => s.free).map((s) => s.no));
+  const svg = seatMapSvg(map)!;
+  const labels = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)"[^>]*>(\d+)<\/text>/g)];
+
+  it('标出来的号全是空闲座位，一个占用都不出现', () => {
+    expect(labels.length).toBeGreaterThan(0);
+    for (const m of labels) expect(freeNos.has(m[3]!)).toBe(true);
+  });
+
+  it('真实一楼大厅能把 58 个空座全标上', () => {
+    expect(labels.length).toBe(freeNos.size);
+  });
+
+  it('标号互不重叠（估宽算盒子）', () => {
+    const boxes = labels.map((m) => {
+      const x = Number(m[1]);
+      const y = Number(m[2]);
+      const w = m[3]!.length * 9 * 0.62;
+      return { x1: x, y1: y - 7, x2: x + w, y2: y + 2 };
+    });
+    let overlaps = 0;
+    for (let a = 0; a < boxes.length; a++) {
+      for (let b = a + 1; b < boxes.length; b++) {
+        const A = boxes[a]!;
+        const B = boxes[b]!;
+        if (!(A.x2 <= B.x1 || A.x1 >= B.x2 || A.y2 <= B.y1 || A.y1 >= B.y2)) overlaps++;
+      }
+    }
+    expect(overlaps).toBe(0);
+  });
+
+  it('每个座位都带 <title> 悬停提示', () => {
+    expect((svg.match(/<title>/g) ?? []).length).toBe(map.seats.length);
+  });
+
+  it('labels:false 时不画标号', () => {
+    const bare = seatMapSvg(map, { labels: false })!;
+    expect((bare.match(/<text [^>]*>\d+<\/text>/g) ?? []).length).toBe(0);
+  });
+});

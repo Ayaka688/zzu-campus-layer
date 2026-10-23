@@ -242,13 +242,34 @@ export function parseSeatMap(raw: unknown): LibSeatMap {
 
 /**
  * 把座位坐标画成 SVG 平面图（真实接口给 point_x/point_y）。
+ * 只给**空闲**座位标号；标号会做碰撞检测，挤不下的就不标（悬停仍能看座位号）。
  * 拿不到坐标就不画——宁可说「看不到图」，也不画一张假图。
  */
-export function seatMapSvg(m: LibSeatMap, opts: { width?: number } = {}): string | undefined {
+export function seatMapSvg(m: LibSeatMap, opts: { width?: number; labels?: boolean } = {}): string | undefined {
   const pts = m.seats.filter((s) => typeof s.x === 'number' && typeof s.y === 'number');
   if (pts.length < 4) return undefined;
 
-  const W = opts.width ?? 720;
+  const wantLabels = opts.labels !== false;
+
+  /* 先按 720 试；标号放得下不到六成就换 1080 再试一次 */
+  const tryWidth = (W: number) => layoutSeatMap(pts, W, wantLabels);
+  let drawn = tryWidth(opts.width ?? 720);
+  if (wantLabels && drawn.labeled < drawn.freeCount * 0.6 && (opts.width ?? 720) < 1080) {
+    const wider = tryWidth(1080);
+    if (wider.labeled > drawn.labeled) drawn = wider;
+  }
+  return drawn.svg;
+}
+
+interface SeatPoint {
+  no: string;
+  x?: number;
+  y?: number;
+  free: boolean;
+  status: string;
+}
+
+function layoutSeatMap(pts: SeatPoint[], W: number, wantLabels: boolean): { svg: string; labeled: number; freeCount: number } {
   const PAD = 16;
   const xs = pts.map((s) => s.x as number);
   const ys = pts.map((s) => s.y as number);
@@ -260,27 +281,93 @@ export function seatMapSvg(m: LibSeatMap, opts: { width?: number } = {}): string
   const spanY = Math.max(maxY - minY, 1);
   const scale = (W - PAD * 2) / spanX;
   const H = Math.min(Math.round(spanY * scale + PAD * 2), 560);
-  const r = Math.max(3, Math.min(7, Math.round(scale * 6)));
-  const freeCount = pts.filter((s) => s.free).length;
+  const r = Math.max(2.5, Math.min(7, scale * 0.9));
+
+  const at = (s: SeatPoint) => ({
+    cx: PAD + ((s.x as number) - minX) * scale,
+    cy: PAD + ((s.y as number) - minY) * scale,
+  });
+
+  /* 已落位的标号盒子，用来做碰撞检测（数字估宽足够准） */
+  const boxes: { x1: number; y1: number; x2: number; y2: number }[] = [];
+  const hit = (b: { x1: number; y1: number; x2: number; y2: number }) =>
+    boxes.some((o) => !(b.x2 < o.x1 || b.x1 > o.x2 || b.y2 < o.y1 || b.y1 > o.y2));
+
+  const free = pts.filter((s) => s.free);
+  const fs = Math.max(6, Math.min(10, Math.round(scale * 1.15)));
+  const labels: string[] = [];
+  let labeled = 0;
+
+  /* 每个标号试 8 个方位，优先选「不压任何座位点」的位置，全都不行才退回压得最少的 */
+  const centers = pts.map((q) => at(q));
+
+  if (wantLabels && free.length) {
+    for (const seat of free.slice().sort((a, b) => a.no.localeCompare(b.no, 'zh'))) {
+      const { cx, cy } = at(seat);
+      const w = seat.no.length * fs * 0.62;
+      const h = fs;
+      const gap = r + 1.5;
+
+      const candidates = [
+        { x: cx + gap, y: cy + fs * 0.28 },
+        { x: cx - gap - w, y: cy + fs * 0.28 },
+        { x: cx - w / 2, y: cy - gap - h * 0.15 },
+        { x: cx - w / 2, y: cy + gap + h * 0.85 },
+        { x: cx + gap * 0.7, y: cy - gap * 0.7 - h * 0.1 },
+        { x: cx - gap * 0.7 - w, y: cy - gap * 0.7 - h * 0.1 },
+        { x: cx + gap * 0.7, y: cy + gap * 0.7 + h * 0.8 },
+        { x: cx - gap * 0.7 - w, y: cy + gap * 0.7 + h * 0.8 },
+      ];
+
+      let best: { box: { x1: number; y1: number; x2: number; y2: number }; covered: number } | undefined;
+      for (const c of candidates) {
+        const box = { x1: c.x, y1: c.y - h * 0.72, x2: c.x + w, y2: c.y + h * 0.28 };
+        if (box.x1 < 1 || box.x2 > W - 2 || box.y1 < 1) continue;
+        if (hit(box)) continue;
+        const covered = centers.filter(
+          (q) => q.cx + r > box.x1 && q.cx - r < box.x2 && q.cy + r > box.y1 && q.cy - r < box.y2,
+        ).length;
+        if (!best || covered < best.covered) best = { box, covered };
+        if (covered === 0) break;
+      }
+      if (!best) continue;
+
+      boxes.push(best.box);
+      labels.push(
+        '<text x="' + best.box.x1.toFixed(1) + '" y="' + (best.box.y2 - 1).toFixed(1) +
+          '" fill="#7ee787" font-size="' + fs + '" font-family="ui-monospace,monospace" stroke="#0f1115" stroke-width="2.5" paint-order="stroke" stroke-linejoin="round">' + seat.no + '</text>',
+      );
+      labeled++;
+    }
+  }
 
   const dots = pts
     .map((s) => {
-      const cx = PAD + ((s.x as number) - minX) * scale;
-      const cy = PAD + ((s.y as number) - minY) * scale;
+      const { cx, cy } = at(s);
       const fill = s.free ? '#3fb950' : '#3a3f47';
-      return '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r + '" fill="' + fill + '"/>';
+      const tip = s.free ? '空闲' : s.status && !/^\d+$/.test(s.status) ? s.status : '已占';
+      return (
+        '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + fill + '">' +
+        '<title>' + s.no + ' · ' + tip + '</title></circle>'
+      );
     })
     .join('');
 
-  return [
+  const legend =
+    '空 ' + free.length + ' / 共 ' + pts.length + (wantLabels && labeled < free.length ? '（标号 ' + labeled + ' 个，其余挤不下）' : '');
+
+  const svg = [
     '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">',
     '<rect width="100%" height="100%" fill="#12141a"/>',
     dots,
-    '<text x="' + PAD + '" y="' + (H - 6) + '" fill="#8b949e" font-size="12" font-family="system-ui,sans-serif">' +
-      '空 ' + freeCount + ' / 共 ' + pts.length +
+    labels.join(''),
+    '<text x="' + PAD + '" y="' + (H - 6) + '" fill="#8b949e" font-size="11" font-family="system-ui,sans-serif">' +
+      legend.replace(/&/g, '&amp;').replace(/</g, '&lt;') +
       '</text>',
     '</svg>',
   ].join('');
+
+  return { svg, labeled, freeCount: free.length };
 }
 
 /** 给 <img src> 用的 data URI（不依赖 btoa 的 latin1 限制） */
