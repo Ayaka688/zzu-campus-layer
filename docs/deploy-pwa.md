@@ -5,7 +5,7 @@
 > **前置：先拿到 `dist/`。** 它**不在仓库里**（构建产物不入库，避免每次提交一堆带 hash 的 chunk）。两种拿法：
 >
 > - **装了 Node**：`cd campus-layer && npm install --ignore-scripts && npm run build`，产物在 `campus-layer/dist/`；
-> - **没装 Node**：打开 [pages workflow 的运行记录](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/pages.yml)，选最新一次，页面底部 **Artifacts** → 下载 `campus-layer-dist`，解压出来的内容等同于 `dist/`。
+> - **没装 Node**：直接下 [campus-layer-dist.zip](https://github.com/rebeca-aa/zzu-campus-layer/releases/download/dist-latest/campus-layer-dist.zip)（不需要登录），解压出来的内容等同于 `dist/`；每次推 `main` 会被自动覆盖更新，见 [releases](https://github.com/rebeca-aa/zzu-campus-layer/releases/latest)。
 
 ## 为什么是静态托管
 

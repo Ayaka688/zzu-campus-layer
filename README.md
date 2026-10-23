@@ -33,13 +33,13 @@
 
 | 形态 | 适合 | 能力 | 怎么装 |
 | --- | --- | --- | --- |
-| **浏览器扩展**（MV3） | 电脑日常用 | 全部 14 个工具 + 通知卡片 + 每日盯梢 | 见 [60 秒上手](#60-秒上手扩展)（没装 Node 就下 Actions 里的 `campus-layer-dist`） |
+| **浏览器扩展**（MV3） | 电脑日常用 | 全部 14 个工具 + 通知卡片 + 每日盯梢 | 见 [60 秒上手](#60-秒上手扩展)（没装 Node 就下 [dist.zip](https://github.com/rebeca-aa/zzu-campus-layer/releases/download/dist-latest/campus-layer-dist.zip)） |
 | **PWA** | 手机（安卓/iOS 都能加主屏幕） | 除"每日盯梢"外的全部；可带模型 key | 打开 [在线演示](https://rebeca-aa.github.io/zzu-campus-layer/) → 加主屏幕 |
 | **安卓壳**（可选） | 想要原生图标 + **课前 30 分钟通知** | PWA 全部 + AlarmManager 提醒 | 从 Actions 下 `campus-layer-debug-apk` |
 
 > 手机 Chrome 至今不支持扩展（Kiwi 已停更），所以手机走 PWA；安卓壳只是把同一个 PWA 包进 WebView，顺便拿到系统通知能力。
 >
-> 想把它部署到自己的域名/子路径？看 [docs/deploy-pwa.md](docs/deploy-pwa.md)。**仓库里没有 `dist/`**（构建产物不入库），要么本地 `npm run build`，要么从 [pages 运行](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/pages.yml)底部下载 `campus-layer-dist` 解压。
+> 想把它部署到自己的域名/子路径？看 [docs/deploy-pwa.md](docs/deploy-pwa.md)。**仓库里没有 `dist/`**（构建产物不入库），要么本地 `npm run build`，要么直接下 [campus-layer-dist.zip](https://github.com/rebeca-aa/zzu-campus-layer/releases/download/dist-latest/campus-layer-dist.zip) 解压。
 
 ---
 
@@ -53,7 +53,8 @@ npm run build                  # 产物在 dist/（这个目录不进仓库，�
 > **仓库里没有 `dist/`**——构建产物不入库（避免每次提交一堆带 hash 的 chunk）。
 > 两种拿法：
 > - 装了 Node：上面两条命令，自己构建出来；
-> - **没装 Node**：打开 [最新的 pages 运行](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/pages.yml)，在页面底部 **Artifacts** 里下载 `campus-layer-dist`，解压就是 `dist` 的内容。
+> - **没装 Node**：直接下 [campus-layer-dist.zip](https://github.com/rebeca-aa/zzu-campus-layer/releases/download/dist-latest/campus-layer-dist.zip)（约 110 KB，**不需要登录 GitHub**），解压就是 `dist` 的内容。
+>   （另一个来源：任意一次 [pages 运行](https://github.com/rebeca-aa/zzu-campus-layer/actions/workflows/pages.yml)页面底部的 Artifacts，但那个要登录。）
 
 1. `edge://extensions`（或 `chrome://extensions`）→ 打开「开发人员模式」→「加载解压缩的扩展」→ 选构建出来的 `dist` 目录。
 2. 浏览器里登录一次 `https://jwxt.zzu.edu.cn/uniapp/index.html`（教务）和/或 `https://uniapp.s.zzu.edu.cn`（门户）。
