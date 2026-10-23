@@ -55,6 +55,13 @@ public class MainActivity extends Activity {
         startActivityForResult(new Intent(this, LoginActivity.class), REQ_LOGIN);
     }
 
+    /** 备用登录页：直接开学校那个树维登录（CAS 那边万一变了还能兜一手）。 */
+    private void openLoginFallback() {
+        Intent i = new Intent(this, LoginActivity.class);
+        i.putExtra("url", AppConfig.LOGIN_URL_FALLBACK);
+        startActivityForResult(i, REQ_LOGIN);
+    }
+
     @Override
     protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
@@ -97,8 +104,9 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onCreateOptionsMenu(android.view.Menu menu) {
-        menu.add(0, 1, 0, "重新登录");
-        menu.add(0, 2, 1, "刷新");
+        menu.add(0, 1, 0, "重新登录（统一认证）");
+        menu.add(0, 3, 1, "备用：学校自带登录页");
+        menu.add(0, 2, 2, "刷新");
         return true;
     }
 
@@ -106,6 +114,7 @@ public class MainActivity extends Activity {
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
         switch (item.getItemId()) {
             case 1: openLogin(); return true;
+            case 3: openLoginFallback(); return true;
             case 2: web.reload(); return true;
             default: return super.onOptionsItemSelected(item);
         }

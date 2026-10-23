@@ -54,7 +54,8 @@ public class LoginActivity extends Activity {
             }
         });
 
-        web.loadUrl(AppConfig.LOGIN_URL);
+        String start = getIntent().getStringExtra("url");
+        web.loadUrl(start == null || start.isEmpty() ? AppConfig.LOGIN_URL : start);
     }
 
     private void maybeHarvest(String url) {
