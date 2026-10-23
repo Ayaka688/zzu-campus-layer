@@ -85,6 +85,32 @@ describe('从手机粘贴的内容里认登录态', () => {
     expect(parseImportLink(`  ${code}\n`).jwxt).toBe(JWT);
   });
 
+  it('hash 路由里的 idToken 也认（uni-app 常见形态）', () => {
+    const got = parseImportLink('https://uniapp.s.zzu.edu.cn/#/pages/tab/main/main?idToken=' + JWT);
+    expect(got.jwxt).toBe(JWT);
+  });
+
+  it('query 与 hash 同时有东西时，仍能从 hash 里捞出 token', () => {
+    const got = parseImportLink('https://jwxt.zzu.edu.cn/uniapp/index.html?from=app#/pages/tab/main/main?idToken=' + JWT);
+    expect(got.jwxt).toBe(JWT);
+  });
+
+  it('App 自定义 scheme 复制的链接也能认', () => {
+    const got = parseImportLink('zzuitOffline://open?target=course&idToken=' + JWT);
+    expect(got.jwxt).toBe(JWT);
+  });
+
+  it('URL 编码过的 token 会先解码再判断', () => {
+    const encoded = encodeURIComponent(JWT);
+    const got = parseImportLink('https://jwxt.zzu.edu.cn/uniapp/index.html?idToken=' + encoded);
+    expect(got.jwxt).toBe(JWT);
+  });
+
+  it('参数名大小写不敏感（IdToken / userToken）', () => {
+    expect(parseImportLink('https://x/index.html?IdToken=' + JWT).jwxt).toBe(JWT);
+    expect(parseImportLink('https://uniapp.s.zzu.edu.cn/a?userToken=' + JWT).jwxt).toBe(JWT);
+  });
+
   it('ticket= 明确拒绝并提示复制登录后的地址', () => {
     expect(() => parseImportLink('https://cas.s.zzu.edu.cn/cas/login?ticket=ST-123')).toThrow(/ticket|idToken/);
   });

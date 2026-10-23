@@ -111,7 +111,8 @@ export function decodeBundle(code: string): TokenBundle {
 }
 
 /** 三段式 JWT 的最简判据（不校验签名，只看结构） */
-const looksJwt = (v: string): boolean => v.split('.').length === 3 && v.length > 20;
+const looksJwt = (v: string): boolean =>
+  /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v) && v.length > 20;
 
 /**
  * 从「手机上粘过来的东西」里认出登录态。
@@ -139,7 +140,30 @@ export function parseImportLink(raw: string): TokenBundle {
   /* 2) 直接就是 token */
   if (looksJwt(text)) return { v: 1, jwxt: text, at: Date.now() };
 
-  /* 3) 学校页面的地址 */
+  /* 3) 学校页面 / App 复制的链接
+        直接全文扫 token 参数，兼容：
+          https://jwxt.zzu.edu.cn/uniapp/index.html?idToken=eyJ…
+          https://uniapp.s.zzu.edu.cn/...#/pages/tab/main/main?idToken=eyJ…
+          https://x/index.html?from=app#/p?idToken=eyJ…（query 与 hash 同时有值）
+          zzuitOffline://xxx?idToken=eyJ…（App 自定义 scheme）
+          userToken= / token= / X-Id-Token=，URL 编码过也行
+   */
+  const grab = (src: string): string | undefined => {
+    const re = /(?:idToken|userToken|token|X-Id-Token)=([^&#\s]+)/i;
+    const m = re.exec(src);
+    if (!m || !m[1]) return undefined;
+    let v = m[1];
+    try {
+      v = decodeURIComponent(v);
+    } catch {
+      /* 保持原样 */
+    }
+    return looksJwt(v) ? v : undefined;
+  };
+
+  const fromRaw = grab(text);
+  if (fromRaw) return { v: 1, jwxt: fromRaw, at: Date.now() };
+
   if (/^https?:/i.test(text)) {
     let url: URL;
     try {
@@ -147,23 +171,15 @@ export function parseImportLink(raw: string): TokenBundle {
     } catch {
       throw new Error('这段链接看起来不完整，重新复制一次地址栏');
     }
-    const hash = url.hash.includes('?') ? url.hash.slice(url.hash.indexOf('?') + 1) : '';
-    const params = new URLSearchParams(url.search || hash);
-    for (const key of ['idToken', 'userToken', 'token', 'X-Id-Token']) {
-      const v = params.get(key);
-      if (v && looksJwt(v)) return { v: 1, jwxt: v, at: Date.now() };
+    const hash = url.hash || '';
+    for (const src of [url.search, hash.slice(hash.indexOf('?') + 1)]) {
+      const v = grab(src);
+      if (v) return { v: 1, jwxt: v, at: Date.now() };
     }
-    if (hash) {
-      const q = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-      for (const key of ['idToken', 'userToken', 'token']) {
-        const v = q.get(key);
-        if (v && looksJwt(v)) return { v: 1, jwxt: v, at: Date.now() };
-      }
-    }
-    if (params.get('ticket') || url.search.includes('ticket=')) {
-      throw new Error('这是 CAS 的一次性 ticket（已经用掉了），要复制登录成功之后那一页的地址，里面才有 idToken');
-    }
-    throw new Error('这个链接里没有 idToken。手机上登录后停在「教学管理平台」首页，再复制地址栏');
+  }
+
+  if (/ticket=/i.test(text)) {
+    throw new Error('这是 CAS 的一次性 ticket（已经用掉了），要复制登录成功之后那一页的地址，里面才有 idToken');
   }
 
   throw new Error('没认出这是什么。可以粘学校页面的地址、eyJ… 开头的 token，或桌面生成的同步码');
