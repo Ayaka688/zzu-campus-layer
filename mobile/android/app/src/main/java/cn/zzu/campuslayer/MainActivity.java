@@ -4,10 +4,13 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -49,7 +52,13 @@ public class MainActivity extends Activity {
             }
         });
 
+        /* 课前提醒：网页侧算好时间点，通过这个桥交给壳去设闹钟。 */
+        web.addJavascriptInterface(new NotifyBridge(), "CampusNotify");
+
         web.loadUrl(AppConfig.APP_URL);
+
+        askNotificationPermission();
+        ReminderScheduler.restore(this);
 
         /* 第一次打开时给个提示，而不是把登录页硬推上来。 */
         if (!getPreferences(MODE_PRIVATE).getBoolean("hinted", false)) {
@@ -58,6 +67,24 @@ public class MainActivity extends Activity {
                     "先在系统浏览器里登录一次，再回来点菜单「导入剪贴板」",
                     Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** 网页 → 壳：一批课前提醒（{at,title,body} 的数组）。JS 接口在各线程回调，切回主线程。 */
+    private class NotifyBridge {
+        @JavascriptInterface
+        public void setReminders(String json) {
+            runOnUiThread(() -> {
+                ReminderScheduler.apply(MainActivity.this, json);
+                Toast.makeText(MainActivity.this, "课前提醒已排好", Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
+
+    /** Android 13+ 通知要用户授权，没有就当场问一次。 */
+    private void askNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) return;
+        requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2001);
     }
 
     /** 用系统浏览器打开登录页（CAS → 教学管理平台，登录成功后地址栏里就带着 idToken）。 */

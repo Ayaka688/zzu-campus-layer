@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
 import { parseImportLink } from '../src/core/kv';
 import { probeLlm } from '../src/core/llm';
+import { buildReminderBlocks, pushReminders } from '../src/core/remind';
+import { CampusService } from '../src/core/services';
 import {
   clearTokens,
   exportTokenBundle,
@@ -74,6 +76,8 @@ function App() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./pwa-sw.js').catch(() => undefined);
     }
+    // 装了安卓壳的话，每次打开都把未来 7 天的课前提醒重排一遍
+    void syncReminders();
   }, []);
 
   useEffect(() => {
@@ -83,6 +87,19 @@ function App() {
   const jwxt = statuses.find((s) => s.source === 'jwxt');
   const portal = statuses.find((s) => s.source === 'portal');
   const ready = Boolean(jwxt?.valid || portal?.valid);
+
+  /** 算未来 7 天的课前提醒并交给壳（没有壳时 pushReminders 返回 false，什么也不做）。 */
+  async function syncReminders() {
+    try {
+      const session = await loadSession();
+      if (!session.jwxtToken && !session.portalToken) return;
+      const svc = new CampusService(session);
+      const [courses, term] = await Promise.all([svc.courses(), svc.term().catch(() => undefined)]);
+      pushReminders(buildReminderBlocks(courses, { termStart: term?.startDate }));
+    } catch {
+      /* 提醒排不上不该影响聊天 */
+    }
+  }
 
   async function submit(text: string) {
     const question = text.trim();
