@@ -665,7 +665,9 @@ function App() {
 
       {view === 'chat' && sheet === 'none' && (
         <>
-          <div class="quick">
+          <div class="dock">
+        <img class="deco" src="./deco.png" alt="" aria-hidden="true" />
+        <div class="quick">
             {QUICK.map((q) => (
               <button key={q.label} onClick={() => void submit(q.text)} disabled={busy}>
                 {q.label}
@@ -690,6 +692,7 @@ function App() {
               发送
             </button>
           </form>
+        </div>
         </>
       )}
     </div>

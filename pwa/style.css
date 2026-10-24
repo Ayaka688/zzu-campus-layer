@@ -841,3 +841,61 @@ header .mark {
 .quick {
   padding-bottom: 2px !important;
 }
+
+
+/* ===== 输入区：快捷条 + 输入框合成一条深米色，右上方贴像素城堡，去掉下划线 ===== */
+.dock {
+  position: relative;
+  background: #e6d9bb;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dock .deco {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 33%;
+  height: auto;
+  pointer-events: none;
+  opacity: 0.92;
+  z-index: 0;
+}
+
+.dock .quick,
+.dock .composer {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+}
+
+.dock .quick {
+  padding: 8px 8px 2px !important;
+}
+
+.dock .composer {
+  padding: 4px 10px 10px !important;
+  border: 0 !important;
+}
+
+.dock .composer input {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 0 !important;
+  border-radius: 0 !important;
+  color: var(--text) !important;
+  padding: 8px 2px !important;
+}
+
+.dock .composer input:focus {
+  outline: none !important;
+  border-bottom: 0 !important;
+}
+
+.dock .composer button {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--text) !important;
+  font-weight: 700 !important;
+  padding: 8px 8px !important;
+}
