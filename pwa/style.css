@@ -791,3 +791,53 @@ button.mini {
 .empty {
   display: none !important;
 }
+
+
+/* ===== 收尾：去掉左上角菱形；输入行与整页同色，只用深米色下划线示意输入框 ===== */
+header h1,
+header .mark {
+  display: none !important;
+}
+
+/* 输入条：与页面同底色，不再有浅色框、不再有蓝色按钮 */
+.composer {
+  background: var(--bg) !important;
+  border-top: 0 !important;
+  padding: 6px 10px 10px !important;
+}
+
+.composer input {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 2px solid #cbb98f !important;
+  border-radius: 0 !important;
+  color: var(--text) !important;
+  padding: 8px 2px !important;
+}
+
+.composer input::placeholder {
+  color: #a3926c !important;
+}
+
+.composer input:focus {
+  outline: none !important;
+  border-bottom-color: #b39f70 !important;
+}
+
+.composer button {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: var(--text) !important;
+  padding: 8px 6px !important;
+  font-weight: 700 !important;
+}
+
+.composer button:disabled {
+  color: #a3926c !important;
+}
+
+/* 快捷问句条与输入行之间也留出一点空气 */
+.quick {
+  padding-bottom: 2px !important;
+}
