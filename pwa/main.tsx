@@ -331,6 +331,17 @@ function App() {
     })();
   }, []);
 
+  /** 壳内登录：调原生桥唤起壳里的登录页（登录完由壳把地址回灌给页面）。 */
+  async function shellLogin() {
+    const bridge = (window as unknown as { CampusNotify?: { login?: () => void } }).CampusNotify;
+    if (bridge?.login) {
+      bridge.login();
+      return;
+    }
+    setNote('这个版本没有登录入口，点「复制登录页链接」，粘到浏览器里登录');
+    setTimeout(() => setNote(''), 4000);
+  }
+
   /** 复制登录页链接：让用户在自己的浏览器里打开（那里一定有地址栏，能复制 ticket）。 */
   async function copyLoginUrl() {
     try {
@@ -396,7 +407,15 @@ function App() {
           {inShell ? (
             <>
               <p class="hint">
-                <strong>点右上角菜单「登录」，用学校账号登录一次就行</strong>——登录完会自动回到这里，不用复制任何东西。
+                <strong>用学校账号登录一次就行</strong>——登录完会自动回到这里，不用复制任何东西。
+              </p>
+              <p class="row">
+                <button class="primary" onClick={() => void shellLogin()}>
+                  用学校账号登录
+                </button>
+                <button class="ghost" onClick={() => void readClip()}>
+                  从剪贴板导入
+                </button>
               </p>
               <p class="hint">换手机、清了数据之后才需要重新登录。</p>
             </>

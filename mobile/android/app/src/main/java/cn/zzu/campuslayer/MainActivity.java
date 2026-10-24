@@ -68,13 +68,19 @@ public class MainActivity extends Activity {
         if (!getPreferences(MODE_PRIVATE).getBoolean("hinted", false)) {
             getPreferences(MODE_PRIVATE).edit().putBoolean("hinted", true).apply();
             Toast.makeText(this,
-                    "点右上角菜单「登录」，用学校账号登录一次就行——登录完会自动回来",
+                    "点页面里的「用学校账号登录」，登录一次就行——登录完会自动回来",
                     Toast.LENGTH_LONG).show();
         }
     }
 
     /** 网页 → 壳：一批课前提醒（{at,title,body} 的数组）。JS 接口在各线程回调，切回主线程。 */
     private class NotifyBridge {
+        /** 网页里的「用学校账号登录」按钮 → 壳：走壳内登录页，登录完自动回灌。 */
+        @JavascriptInterface
+        public void login() {
+            runOnUiThread(MainActivity.this::openLogin);
+        }
+
         @JavascriptInterface
         public void setReminders(String json) {
             runOnUiThread(() -> {
