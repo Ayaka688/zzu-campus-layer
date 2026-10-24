@@ -92,6 +92,8 @@ function App() {
   const [noticeDigest, setNoticeDigest] = useState<TodayDigest | null>(null);
   /* 两类通知分开控制：课前提醒默认开（学生本来就想被提醒），资讯通知默认关（不打扰）。 */
   const [notifyClass, setNotifyClass] = useState(true);
+  /* 配色：cream=米白（默认）/ ink=黑+藏青 */
+  const [theme, setTheme] = useState<'cream' | 'ink'>('cream');
   const [notifyNews, setNotifyNews] = useState(false);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
@@ -104,6 +106,10 @@ function App() {
     setStatuses(await tokenStatuses());
     setLlm(await getLlmSettings());
     setNoticePrefsState(await getNoticePrefs());
+      const themePref = await getKV().get<string>('theme');
+      const t = themePref === 'ink' ? 'ink' : 'cream';
+      setTheme(t);
+      document.documentElement.dataset.theme = t;
       const classPref = await getKV().get<boolean>('notifyClass');
       const newsPref = await getKV().get<boolean>('notifyNews');
       setNotifyClass(classPref !== false);
@@ -665,7 +671,20 @@ function App() {
 
       {view === 'chat' && sheet === 'none' && (
         <>
-          <div class="dock">
+          <div class="theme-switch">
+        <button
+          type="button"
+          onClick={() => {
+            const next = theme === 'cream' ? 'ink' : 'cream';
+            setTheme(next);
+            document.documentElement.dataset.theme = next;
+            void getKV().set('theme', next);
+          }}
+        >
+          配色：{theme === 'cream' ? '米白' : '藏青'}
+        </button>
+      </div>
+      <div class="dock">
         <img class="deco" src="./deco.png" alt="" aria-hidden="true" />
         <div class="quick">
             {QUICK.map((q) => (

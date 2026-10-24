@@ -1000,3 +1000,150 @@ header .chip + .mini {
   border-left: 1px solid #e2d3ad !important;
   padding-left: 10px !important;
 }
+
+
+/* ===== 可换配色：黑 + 藏青（html[data-theme=ink]），默认仍是米白 ===== */
+.theme-switch {
+  position: fixed;
+  right: 10px;
+  bottom: 104px;
+  z-index: 9;
+}
+
+.theme-switch button {
+  background: rgba(0, 0, 0, 0.42);
+  color: #f4ebd7;
+  border: 0;
+  border-radius: 2px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+html[data-theme='ink'] {
+  --bg: #0b1220;
+  --panel: #101a2c;
+  --text: #e8eefa;
+  --dim: #8ea0bd;
+  --accent: #2f5fe0;
+  color-scheme: dark;
+}
+
+html[data-theme='ink'] body {
+  background: #0b1220;
+  color: #e8eefa;
+}
+
+html[data-theme='ink'] header {
+  background: transparent !important;
+  color: #e8eefa !important;
+  border-bottom: 1px solid #1e2c45 !important;
+}
+
+html[data-theme='ink'] header .chip,
+html[data-theme='ink'] header .mini {
+  color: #8ea0bd !important;
+}
+
+html[data-theme='ink'] .bubble {
+  background: #101a2c !important;
+  color: #e8eefa !important;
+}
+
+html[data-theme='ink'] .bubble.me,
+html[data-theme='ink'] .bubble.user,
+html[data-theme='ink'] .bubble.user-msg {
+  background: #2f5fe0 !important;
+  color: #f2f6ff !important;
+}
+
+html[data-theme='ink'] .quick button,
+html[data-theme='ink'] .quick {
+  color: #8ea0bd !important;
+  background: transparent !important;
+}
+
+html[data-theme='ink'] .dock {
+  background: #0e1728 !important;
+}
+
+html[data-theme='ink'] .dock .composer input {
+  color: #e8eefa !important;
+  background: transparent !important;
+  border-bottom: 1px solid #24334f !important;
+}
+
+html[data-theme='ink'] .dock .composer input::placeholder {
+  color: #6d7d9a !important;
+}
+
+html[data-theme='ink'] .dock .composer button {
+  color: #7aa2ff !important;
+}
+
+html[data-theme='ink'] .dock .deco {
+  opacity: 0.45;
+  filter: grayscale(1) brightness(0.85);
+}
+
+html[data-theme='ink'] .sheet {
+  background: #0e1728 !important;
+}
+
+html[data-theme='ink'] .sheet textarea,
+html[data-theme='ink'] .sheet input[type='text'],
+html[data-theme='ink'] .sheet select {
+  background: #101a2c !important;
+  color: #e8eefa !important;
+  border: 1px solid #24334f !important;
+}
+
+html[data-theme='ink'] button.primary,
+html[data-theme='ink'] a.primary {
+  background: #2f5fe0 !important;
+  color: #f2f6ff !important;
+}
+
+html[data-theme='ink'] button.ghost,
+html[data-theme='ink'] a.ghost,
+html[data-theme='ink'] button.mini {
+  background: #101a2c !important;
+  color: #e8eefa !important;
+}
+
+html[data-theme='ink'] .nb,
+html[data-theme='ink'] .nb * {
+  color: #e8eefa !important;
+}
+
+html[data-theme='ink'] .nb-hint,
+html[data-theme='ink'] .nb-readtag,
+html[data-theme='ink'] .nb-empty {
+  color: #8ea0bd !important;
+}
+
+html[data-theme='ink'] .nb-card-top,
+html[data-theme='ink'] .nb .nb-list > * {
+  background: #101a2c !important;
+  border-bottom: 1px solid #24334f !important;
+}
+
+html[data-theme='ink'] .nb-tabs,
+html[data-theme='ink'] .nb-actions,
+html[data-theme='ink'] .nb-subs,
+html[data-theme='ink'] .nb-today {
+  border-bottom: 1px solid #24334f !important;
+}
+
+html[data-theme='ink'] .nb-tab + .nb-tab,
+html[data-theme='ink'] .nb-btn + .nb-btn,
+html[data-theme='ink'] .nb-mini + .nb-mini {
+  border-left: 1px solid #24334f !important;
+}
+
+html[data-theme='ink'] .hint,
+html[data-theme='ink'] .note {
+  color: #8ea0bd;
+}
