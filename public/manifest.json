@@ -26,7 +26,8 @@
     "https://api.siliconflow.cn/*",
     "https://dashscope.aliyuncs.com/*",
     "https://api.moonshot.cn/*",
-    "https://openrouter.ai/*"
+    "https://openrouter.ai/*",
+    "https://open.bigmodel.cn/*"
   ],
   "background": {
     "service_worker": "background.js",
