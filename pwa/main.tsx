@@ -48,7 +48,7 @@ interface Message {
 
 const CAS_LOGIN =
   'https://cas.s.zzu.edu.cn/cas/login?service=' +
-  encodeURIComponent('https://jwxt.zzu.edu.cn/uniapp/index.html');
+  encodeURIComponent('https://uniapp.s.zzu.edu.cn/pages/tab/index/index');
 
 const QUICK: Array<{ label: string; text: string }> = [
   { label: '明天有课吗', text: '明天有课吗' },
@@ -386,7 +386,7 @@ function App() {
             安卓版 App 自带菜单里那个「复制链接」是坏的（剪贴板不变），试试<strong>系统级分享</strong>：长按页面或点右上角分享 → 选「复制链接」/ 发到微信再复制。
           </p>
           <p class="hint">
-            <strong>办法二：点按钮去登录（干净设备上可能落回树维页，有两条补救）</strong>
+            <strong>办法二：点按钮去门户登录（登录完地址栏会带 ticket，我们能解）</strong>
           </p>
           <p class="row">
             <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
@@ -394,9 +394,11 @@ function App() {
             </a>
           </p>
           <p class="hint">
-            它会带你去<strong>统一身份认证</strong>（不是树维那个登录页）。登录成功后：
-            <br />· 如果跳到「教学管理平台」且<strong>地址栏带 <code>idToken=eyJ…</code></strong> → 长按地址栏复制整条网址，粘到下面保存。
-            <br />· 如果落回<strong>树维登录页</strong>（无痕/新设备上很常见，不是你操作错了）→ 先回本页<strong>再点一次这个按钮</strong>（此时 CAS 会话已在），多数能带出 idToken；或者改用办法一。
+            它去的是<strong>统一身份认证</strong>（不是树维那个登录页）。登录成功后有两种落点，<strong>两种都能粘</strong>：
+            <br />· 跳回门户首页，地址栏变成 <code>…/pages/tab/index/index?ticket=eyJ…</code> → 长按地址栏复制整条网址；
+            <br />· 跳到「教学管理平台」且地址栏带 <code>idToken=eyJ…</code> → 同样复制整条网址。
+            <br /><strong>ticket 里就装着 idToken</strong>（学校 App 自己也是这么解的），粘进来我们本地解出来，不需要联网换。
+            <br />· 万一落回<strong>树维登录页</strong>（无痕/新设备上偶尔）→ 回本页<strong>再点一次</strong>（此时 CAS 会话已在），或者改用办法一。
           </p>
           <p class="hint">
             ⚠️ 别直接打开 <code>cas.s.zzu.edu.cn</code> 根地址（没有 service 参数会 404），也别在教务站里输学校账号（那页是树维的，不认统一身份认证）。
@@ -406,7 +408,7 @@ function App() {
           </p>
           <textarea
             rows={4}
-            placeholder="粘贴学校页面的网址（带 idToken）／eyJ 开头的 token／同步码"
+            placeholder="粘贴学校的网址（带 ticket 或 idToken 都行）／eyJ 开头的 token／同步码"
             value={paste}
             onInput={(e) => setPaste((e.target as HTMLTextAreaElement).value)}
           />

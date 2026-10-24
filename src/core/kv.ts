@@ -111,6 +111,26 @@ export function decodeBundle(code: string): TokenBundle {
 }
 
 /** 三段式 JWT 的最简判据（不校验签名，只看结构） */
+/**
+ * CAS 回调带的 `ticket` 本身是个 JWT，payload 里装着 idToken。
+ * 这是 App 自己的做法（校方 H5 的 getTokenIfTicketExist：
+ * `JSON.parse(base64url.decode(ticket.split('.')[1])).idToken`），
+ * 所以浏览器里复制到带 ticket 的地址，我们也能就地解出真正的令牌。
+ */
+export function decodeCasTicket(ticket: string): string | undefined {
+  const parts = ticket.split('.');
+  if (parts.length < 2 || !parts[1]) return undefined;
+  try {
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const json = JSON.parse(decodeURIComponent(escape(atob(padded)))) as Record<string, unknown>;
+    const inner = json.idToken ?? json.id_token;
+    return typeof inner === 'string' && looksJwt(inner) ? inner : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const looksJwt = (v: string): boolean =>
   /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v) && v.length > 20;
 
@@ -122,7 +142,7 @@ const looksJwt = (v: string): boolean =>
  *  - 直接粘 X-Id-Token（eyJ…）；
  *  - 桌面面板生成的同步码（base64 bundle，走 decodeBundle）。
  *
- * ticket= 是一次性 CAS 服务票据，不是 idToken，所以明确拒绝并给出替代办法。
+ * ticket= 看起来像一次性票据，但它本身是个 JWT、payload 里装着 idToken（App 自己就是这么解的），所以先尝试 decodeCasTicket，解不出才报错。
  */
 export function parseImportLink(raw: string): TokenBundle {
   const text = raw.trim();
@@ -137,8 +157,11 @@ export function parseImportLink(raw: string): TokenBundle {
     }
   }
 
-  /* 2) 直接就是 token */
-  if (looksJwt(text)) return { v: 1, jwxt: text, at: Date.now() };
+  /* 2) 直接就是 token（也可能粘来的是 CAS ticket，里面装着 idToken） */
+  if (looksJwt(text)) {
+    const inner = decodeCasTicket(text) ?? text;
+    return { v: 1, jwxt: inner, at: Date.now() };
+  }
 
   /* 3) 学校页面 / App 复制的链接
         直接全文扫 token 参数，兼容：
@@ -178,8 +201,19 @@ export function parseImportLink(raw: string): TokenBundle {
     }
   }
 
-  if (/ticket=/i.test(text)) {
-    throw new Error('这是 CAS 的一次性 ticket（已经用掉了），要复制登录成功之后那一页的地址，里面才有 idToken');
+  const ticketHit = /[?&#]ticket=([^&#\s]+)/i.exec(text);
+  if (ticketHit?.[1]) {
+    let raw = ticketHit[1];
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      /* 原样用 */
+    }
+    const inner = decodeCasTicket(raw);
+    if (inner) return { v: 1, jwxt: inner, at: Date.now() };
+    throw new Error(
+      '这段 ticket 里没有 idToken（可能是 CAS 的普通票据）。重新登录后复制跳转回来那一页的完整地址，或直接复制 App 的分享链接',
+    );
   }
 
   throw new Error('没认出这是什么。可以粘学校页面的地址、eyJ… 开头的 token，或桌面生成的同步码');
