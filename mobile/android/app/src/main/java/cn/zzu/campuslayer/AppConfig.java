@@ -4,6 +4,9 @@ package cn.zzu.campuslayer;
  * 一处改完就够：换域名 / 换部署地址只动这里。
  */
 final class AppConfig {
+    /** 主界面加载的 PWA（换成自己的 Pages 地址也行）。 */
+    static final String APP_URL = "https://rebeca-aa.github.io/zzu-campus-layer/pwa/index.html";
+
     /**
      * 登录入口。
      *
