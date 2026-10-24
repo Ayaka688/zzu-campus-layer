@@ -1147,3 +1147,29 @@ html[data-theme='ink'] .hint,
 html[data-theme='ink'] .note {
   color: #8ea0bd;
 }
+
+/* 配色行（设置面板内）与城堡保持原色 */
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 4px;
+}
+.theme-row span {
+  color: var(--dim);
+  font-size: 13px;
+}
+.theme-row .ghost {
+  padding: 3px 12px;
+}
+.theme-row .ghost.on {
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+html[data-theme='ink'] .dock .deco {
+  opacity: 0.92 !important;
+  filter: none !important;
+}
+.theme-switch {
+  display: none !important;
+}

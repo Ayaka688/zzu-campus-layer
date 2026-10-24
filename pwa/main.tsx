@@ -94,6 +94,11 @@ function App() {
   const [notifyClass, setNotifyClass] = useState(true);
   /* 配色：cream=米白（默认）/ ink=黑+藏青 */
   const [theme, setTheme] = useState<'cream' | 'ink'>('ink');
+  const applyTheme = async (next: 'cream' | 'ink') => {
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+    await getKV().set('theme', next);
+  };
   const [notifyNews, setNotifyNews] = useState(false);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
@@ -569,7 +574,12 @@ function App() {
             </button>
           </div>
           {note && <p class="note">{note}</p>}
-          <label class="row" style="align-items:center;gap:8px">
+          <div class="theme-row">
+              <span>配色</span>
+              <button type="button" class={theme === 'cream' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('cream')}>米白</button>
+              <button type="button" class={theme === 'ink' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('ink')}>藏青</button>
+            </div>
+            <label class="row" style="align-items:center;gap:8px">
             <input
               type="checkbox"
               checked={notifyClass}
@@ -671,20 +681,7 @@ function App() {
 
       {view === 'chat' && sheet === 'none' && (
         <>
-          <div class="theme-switch">
-        <button
-          type="button"
-          onClick={() => {
-            const next = theme === 'cream' ? 'ink' : 'cream';
-            setTheme(next);
-            document.documentElement.dataset.theme = next;
-            void getKV().set('theme', next);
-          }}
-        >
-          配色：{theme === 'cream' ? '米白' : '藏青'}
-        </button>
-      </div>
-      <div class="dock">
+          <div class="dock">
         <img class="deco" src="./deco.png" alt="" aria-hidden="true" />
         <div class="quick">
             {QUICK.map((q) => (
