@@ -664,7 +664,7 @@ function App() {
       </main>
       )}
 
-      {view === 'chat' && (
+      {view === 'chat' && sheet === 'none' && (
         <>
           <div class="quick">
             {QUICK.map((q) => (

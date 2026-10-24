@@ -39,7 +39,7 @@ export interface LlmProvider {
 export const LLM_PROVIDERS: LlmProvider[] = [
   {
     id: 'school',
-    label: '学校 DeepSeek（校园网）',
+    label: 'DS-R1（学校，仅校园网）',
     // 学校这层是 Open WebUI，接口挂在 /api 下（/api/chat/completions）
     baseUrl: `${LLM_BASE}/api`,
     model: DEFAULT_MODEL,
@@ -47,7 +47,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     // 学校现在只给 R1（推理模型，带 think 段），没有 function calling；
     // 走老的「JSON 判意图」路径，别指望它可靠地调工具。
     supportsTools: false,
-    hint: '免费，但只有校园网 / VPN 能连；只提供 R1，不支持工具调用，请配合第三方模型使用。',
+    hint: 'DS-R1 · 只能校园网 / VPN · 手机端用不了（页面是 https，它是 http）。',
   },
   {
     id: 'deepseek',
