@@ -341,7 +341,14 @@ function App() {
       {sheet === 'login' && (
         <section class="sheet">
           <p class="hint">
-            <strong>办法一：点这个按钮去登录（不用电脑）</strong>
+            <strong>办法一：用「豫见郑大」App 的分享链接（实测最可靠，不依赖浏览器缓存）</strong>
+          </p>
+          <p class="hint">
+            在 App 里打开任意页面 → 用「复制链接 / 分享 → 复制链接」，把链接粘到下面。<strong>鸿蒙版实测可用</strong>；
+            安卓版 App 自带菜单里那个「复制链接」是坏的（剪贴板不变），试试<strong>系统级分享</strong>：长按页面或点右上角分享 → 选「复制链接」/ 发到微信再复制。
+          </p>
+          <p class="hint">
+            <strong>办法二：点按钮去登录（干净设备上可能落回树维页，有两条补救）</strong>
           </p>
           <p class="row">
             <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
@@ -349,19 +356,15 @@ function App() {
             </a>
           </p>
           <p class="hint">
-            它会带你去<strong>统一身份认证</strong>（不是在教务站里输树维密码）。登录成功后会自动跳到「教学管理平台」，
-            这时<strong>地址栏里带着 <code>idToken=eyJ…</code></strong> —— 长按地址栏复制整条网址，回来粘到下面保存。
+            它会带你去<strong>统一身份认证</strong>（不是树维那个登录页）。登录成功后：
+            <br />· 如果跳到「教学管理平台」且<strong>地址栏带 <code>idToken=eyJ…</code></strong> → 长按地址栏复制整条网址，粘到下面保存。
+            <br />· 如果落回<strong>树维登录页</strong>（无痕/新设备上很常见，不是你操作错了）→ 先回本页<strong>再点一次这个按钮</strong>（此时 CAS 会话已在），多数能带出 idToken；或者改用办法一。
           </p>
           <p class="hint">
             ⚠️ 别直接打开 <code>cas.s.zzu.edu.cn</code> 根地址（没有 service 参数会 404），也别在教务站里输学校账号（那页是树维的，不认统一身份认证）。
           </p>
           <p class="hint">
-            <strong>办法二（实测最稳）：用「豫见郑大」App 复制链接。</strong>
-            在 App 里把任意页面「复制链接」，粘到下面即可（链接里带 idToken）。
-            <br />注意：<strong>鸿蒙版实测可用</strong>；<strong>安卓版这个「复制链接」目前是坏的</strong>（剪贴板不变），安卓请走办法一。
-          </p>
-          <p class="hint">
-            <strong>办法三：电脑同步。</strong>电脑装扩展 → 侧边栏 ⚙ →「生成手机同步码」→ 把那段码发到手机粘进来（一张教务票 30 天）。
+            <strong>办法三：电脑同步（最稳）。</strong>电脑装扩展 → 侧边栏 ⚙ →「生成手机同步码」→ 把那段码发到手机粘进来（一张教务票 30 天）。
           </p>
           <textarea
             rows={4}
