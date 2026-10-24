@@ -302,6 +302,44 @@ function App() {
     setTestNote(r.ok ? `连通 ✓ ${r.ms}ms（${r.model} 回：${r.text || ''}）` : `失败 ✗ ${r.error ?? '未知原因'}`);
   }
 
+  /* 从分享链接自动导入：链接形如 .../pwa/index.html#code=<同步码> 或 #token=<JWT>
+     —— 一台有登录态的设备点「复制分享链接」，发给另一台设备点开即可，不用手打码。 */
+  useEffect(() => {
+    const src = (location.hash || '').replace(/^#/, '') || '';
+    const m = /(?:code|token|idToken)=([^&]+)/i.exec(src);
+    const hit = m && m[1] ? m[1] : '';
+    if (!hit) return;
+    (async () => {
+      try {
+        const raw = decodeURIComponent(hit);
+        const bundle = parseImportLink(raw);
+        const st = await importTokenBundle(bundle);
+        setStatuses(st);
+        const llmNow = await getLlmSettings();
+        setLlm(llmNow);
+        setNote('已从链接导入登录态');
+        setTimeout(() => setNote(''), 2500);
+      } catch (e) {
+        setNote(e instanceof Error ? e.message : String(e));
+      } finally {
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+    })();
+  }, []);
+
+  /** 手机端没有 content script；这里生成「分享链接」，发给另一台设备点开即用。 */
+  async function shareLink() {
+    try {
+      const code = await exportTokenBundle();
+      const url = location.origin + location.pathname + '#code=' + encodeURIComponent(code);
+      await navigator.clipboard.writeText(url);
+      setNote('分享链接已复制（长度 ' + url.length + '），发给另一台设备点开即可');
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    }
+    setTimeout(() => setNote(''), 4000);
+  }
+
   /** 手机端没有 content script，导出码主要是方便测试时把手机上的搬到别处。 */
   async function doExport() {
     try {
@@ -382,6 +420,9 @@ function App() {
             </button>
             <button class="ghost" onClick={() => void doExport()}>
               导出当前码
+            </button>
+            <button class="ghost" onClick={() => void shareLink()}>
+              复制分享链接
             </button>
             <button
               class="ghost"
