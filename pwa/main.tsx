@@ -530,6 +530,14 @@ function App() {
             </button>
           </div>
           {note && <p class="note">{note}</p>}
+          <label class="row" style="align-items:center;gap:8px">
+            <input
+              type="checkbox"
+              checked={notifyOn}
+              onChange={(e) => void toggleNotify((e.target as HTMLInputElement).checked)}
+            />
+            <span>开启系统通知（课前 30 分钟提醒，有新通知时提醒一次）</span>
+          </label>
           <p class="hint">
             当前状态：教务 {jwxt?.present ? (jwxt.valid ? jwxt.remainingText : '已过期') : '未导入'} · 门户{' '}
             {portal?.present ? (portal.valid ? portal.remainingText : '已过期') : '未导入'}
