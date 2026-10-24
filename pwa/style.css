@@ -475,3 +475,162 @@ a.primary {
   text-decoration: none;
   line-height: 1.6;
 }
+
+
+/* ===== 主题覆盖：蓝 + 米白（去胶囊外环，并列元素用粗黑竖线分隔） ===== */
+:root {
+  --bg: #f7f0df;
+  --panel: #fffaf0;
+  --line: #111111;
+  --text: #0f1f3d;
+  --dim: #5c6b84;
+  --accent: #1b4fd8;
+  --ok: #17754f;
+  --warn: #a2650a;
+  --err: #b3261e;
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  background: var(--accent);
+  color: #fdf8ec;
+  border-bottom: 2px solid var(--line);
+}
+
+header h1 {
+  color: #fdf8ec;
+  letter-spacing: 0.02em;
+}
+
+header .mark {
+  vertical-align: -2px;
+  margin-left: 6px;
+  color: #0f1f3d;
+}
+
+/* 顶部并列的小按钮：不要椭圆外环，只留一条粗黑竖线 */
+header .chip,
+header .mini {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #fdf8ec !important;
+  padding: 2px 10px !important;
+  border-left: 2px solid #0f1f3d !important;
+}
+
+header .chip:first-of-type {
+  border-left: 0 !important;
+}
+
+/* 消息气泡：去掉胶囊，改用 2px 黑描边 + 极小圆角 */
+.bubble {
+  border-radius: 4px !important;
+  border: 2px solid var(--line) !important;
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.bubble.me,
+.bubble.user,
+.bubble.user-msg {
+  background: var(--accent) !important;
+  color: #fdf8ec !important;
+  border-color: var(--accent) !important;
+}
+
+/* 快捷问句：并列排开，用粗黑竖线分隔，不要胶囊 */
+.quick {
+  gap: 0 !important;
+  border-top: 2px solid var(--line);
+  background: var(--panel);
+}
+
+.quick button {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  border-right: 2px solid var(--line) !important;
+  padding: 6px 12px !important;
+}
+
+.quick button:disabled {
+  opacity: 0.45;
+}
+
+/* 输入区 */
+.composer {
+  border-top: 2px solid var(--line);
+  background: var(--panel);
+}
+
+.composer input {
+  border: 2px solid var(--line) !important;
+  border-radius: 4px !important;
+  background: #fffdf7 !important;
+  color: var(--text) !important;
+}
+
+.composer button {
+  border: 2px solid var(--accent) !important;
+  border-radius: 4px !important;
+  background: var(--accent) !important;
+  color: #fdf8ec !important;
+}
+
+/* 设置面板与卡片同样处理 */
+.sheet {
+  background: var(--panel);
+  border-bottom: 2px solid var(--line);
+}
+
+.sheet textarea,
+.sheet input[type='text'],
+.sheet select {
+  border: 2px solid var(--line) !important;
+  border-radius: 4px !important;
+  background: #fffdf7 !important;
+  color: var(--text) !important;
+}
+
+button.primary,
+a.primary {
+  border-radius: 4px !important;
+  background: var(--accent) !important;
+  color: #fdf8ec !important;
+  border: 2px solid var(--accent) !important;
+}
+
+button.ghost,
+a.ghost,
+button.mini {
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  border: 2px solid var(--line) !important;
+}
+
+.hint,
+.note,
+p.hint {
+  color: var(--dim);
+}
+
+.hint.warn {
+  color: var(--warn);
+}
+
+.hint.ok {
+  color: var(--ok);
+}
+
+.empty {
+  color: var(--dim);
+}

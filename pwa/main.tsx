@@ -452,7 +452,18 @@ function App() {
   return (
     <div class="app">
       <header>
-        <h1>校园信息层</h1>
+        <h1>
+              校园信息层
+              <svg class="mark" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+                <path
+                  d="M12 1.6c.55 4.55 2.7 6.7 7.25 7.25-4.55.55-6.7 2.7-7.25 7.25-.55-4.55-2.7-6.7-7.25-7.25C9.7 8.3 11.45 6.15 12 1.6z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.1"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </h1>
         <div class="chips">
           <button
             class={`chip${view === 'notices' ? ' on' : ''}`}
@@ -612,7 +623,7 @@ function App() {
         <main>
         {messages.length === 0 && (
           <div class="empty">
-            <p>{ready ? '问点实际的：' : '先在右上角导入一次登录态，然后：'}</p>
+            <p>{ready ? '' : '先在右上角导入一次登录态，然后：'}</p>
             <ul>
               <li>明天有课吗（会附校园地图）</li>
               <li>明天下午哪间教室空着</li>
@@ -684,7 +695,7 @@ function App() {
             <input
               value={input}
               onInput={(e) => setInput((e.target as HTMLInputElement).value)}
-              placeholder="问点什么，比如「明天下午有空的教室吗」"
+              placeholder=""
               enterkeyhint="send"
             />
             <button type="submit" disabled={busy || !input.trim()}>
