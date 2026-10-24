@@ -68,6 +68,8 @@ function App() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [sheet, setSheet] = useState<'none' | 'login'>('none');
+  /* 在安卓壳里（壳注入了 CampusNotify）登录由原生菜单接管，不需要用户复制地址 */
+  const inShell = typeof (window as unknown as { CampusNotify?: unknown }).CampusNotify !== 'undefined';
   const [paste, setPaste] = useState('');
   const [note, setNote] = useState('');
   const [testing, setTesting] = useState(false);
@@ -329,6 +331,17 @@ function App() {
     })();
   }, []);
 
+  /** 复制登录页链接：让用户在自己的浏览器里打开（那里一定有地址栏，能复制 ticket）。 */
+  async function copyLoginUrl() {
+    try {
+      await navigator.clipboard.writeText(CAS_LOGIN);
+      setNote('登录页链接已复制，粘到浏览器地址栏打开');
+    } catch {
+      setNote('浏览器不让复制，请长按下面的按钮「打开学校登录页」→ 在新标签页里打开');
+    }
+    setTimeout(() => setNote(''), 4000);
+  }
+
   /** 手机端没有 content script；这里生成「分享链接」，发给另一台设备点开即用。 */
   async function shareLink() {
     try {
@@ -380,37 +393,39 @@ function App() {
 
       {sheet === 'login' && (
         <section class="sheet">
-          <p class="hint">
-            <strong>主路径：点下面的按钮去登录，登录完地址栏里就有 ticket（我们本地解码）</strong>
-          </p>
-          <p class="row">
-            <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
-              打开学校登录页
-            </a>
-          </p>
-          <p class="hint">
-            它去的是<strong>统一身份认证</strong>（不是树维那个登录页）。登录成功后你会看到<strong>一屏代码/样式文本</strong>——这是故意的：
-            CAS 会把地址跳到一个<strong>静态样式文件</strong>上，这样页面不会启动门户那套单页应用，也就没人去把 <code>?ticket=</code> 从地址栏里抹掉。
-            <br />· 这时<strong>长按地址栏 → 复制整条网址</strong>（形如 <code>…/static/index.a5c69d49.css?ticket=eyJ…</code>），粘到下面保存即可。
-            <br />· <strong>ticket 本身就是 JWT，里面装着 idToken</strong>（学校 App 自己也是这么解的），我们本地解出来，不需要联网换票。
-            <br />· 如果看到的是 404，<strong>也照样复制</strong>——地址栏里的 ticket 才是我们要的。
-            <br />· 万一落回<strong>树维登录页</strong> → 回本页<strong>再点一次</strong>（此时 CAS 会话已在），或者改用办法一。
-          </p>
-          <p class="hint">
-            ⚠️ 别直接打开 <code>cas.s.zzu.edu.cn</code> 根地址（没有 service 参数会 404），也别在教务站里输学校账号（那页是树维的，不认统一身份认证）。
-          </p>
-          <p class="hint">
-            <strong>备用：用「豫见郑大」App 的分享链接。</strong>
-            App 里任意页面 → 分享 / 复制链接 → 粘到下面。<strong>鸿蒙版实测可用</strong>；安卓版 App 自带「复制链接」是坏的（剪贴板不变），
-            可试系统级分享（长按页面 / 发到微信再复制）。
-          </p>
-          <p class="hint">
-            已经手里有同步码 / 分享码（<code>#code=…</code>）的，也一样粘进来就能用——只是<strong>不再推荐</strong>「先去电脑上弄一个」，
-            因为教务系统在电脑浏览器里常常登不进去。
-          </p>
+          {inShell ? (
+            <>
+              <p class="hint">
+                <strong>点右上角菜单「登录」，用学校账号登录一次就行</strong>——登录完会自动回到这里，不用复制任何东西。
+              </p>
+              <p class="hint">换手机、清了数据之后才需要重新登录。</p>
+            </>
+          ) : (
+            <>
+              <p class="hint">
+                <strong>办法一（推荐）：用学校账号登录</strong>
+              </p>
+              <p class="row">
+                <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
+                  打开学校登录页
+                </a>
+                <button class="ghost" onClick={() => void copyLoginUrl()}>
+                  复制登录页链接
+                </button>
+              </p>
+              <p class="hint">
+                登录成功后会跳到<strong>一屏代码文本</strong>，这时<strong>长按地址栏 → 复制整条网址 → 回来粘到下面</strong>。
+                <br />跳到 404 或空白页也照样复制地址栏里的网址。
+                <br />如果新打开的页面里<strong>没有地址栏</strong>，先点「复制登录页链接」，粘到自己手机的浏览器里打开。
+              </p>
+              <p class="hint">
+                <strong>办法二：「豫见郑大」App 分享链接</strong>（鸿蒙版可用）：App 里任意页面 → 分享 / 复制链接 → 粘到下面。
+              </p>
+            </>
+          )}
           <textarea
             rows={4}
-            placeholder="粘贴学校的网址（带 ticket 或 idToken 都行）／eyJ 开头的 token／同步码"
+            placeholder="把复制的整条网址粘到这里"
             value={paste}
             onInput={(e) => setPaste((e.target as HTMLTextAreaElement).value)}
           />
