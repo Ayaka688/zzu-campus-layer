@@ -90,8 +90,9 @@ function App() {
   );
   const [noticeCards, setNoticeCards] = useState<NoticeCard[]>([]);
   const [noticeDigest, setNoticeDigest] = useState<TodayDigest | null>(null);
-  /* 系统通知总开关：默认关闭；开启了才排课前提醒、才在出现新通知时打扰用户。 */
-  const [notifyOn, setNotifyOn] = useState(false);
+  /* 两类通知分开控制：课前提醒默认开（学生本来就想被提醒），资讯通知默认关（不打扰）。 */
+  const [notifyClass, setNotifyClass] = useState(true);
+  const [notifyNews, setNotifyNews] = useState(false);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
@@ -103,8 +104,10 @@ function App() {
     setStatuses(await tokenStatuses());
     setLlm(await getLlmSettings());
     setNoticePrefsState(await getNoticePrefs());
-      const on = await getKV().get<boolean>('notifyOn');
-      setNotifyOn(on === true);
+      const classPref = await getKV().get<boolean>('notifyClass');
+      const newsPref = await getKV().get<boolean>('notifyNews');
+      setNotifyClass(classPref !== false);
+      setNotifyNews(newsPref === true);
   }
 
   /** 手机端直接跑工具（没有 background），卡片管线与桌面完全同一条。 */
@@ -178,7 +181,7 @@ function App() {
 
   /** 算未来 7 天的课前提醒并交给壳（没有壳时 pushReminders 返回 false，什么也不做）。 */
   async function syncReminders() {
-    if (!notifyOn) return;
+    if (!notifyClass) return;
     try {
       const session = await loadSession();
       if (!session.jwxtToken && !session.portalToken) return;
@@ -341,24 +344,44 @@ function App() {
     })();
   }, []);
 
-  async function toggleNotify(next: boolean) {
-    setNotifyOn(next);
-    await getKV().set('notifyOn', next);
+  /** 打开任一类通知时才申请权限（不打扰用户）。 */
+  async function ensureNotifyPermission() {
     const bridge = (window as unknown as { CampusNotify?: { askNotify?: () => void } }).CampusNotify;
-    if (next) {
-      if (bridge?.askNotify) bridge.askNotify();
-      else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-        try { await Notification.requestPermission(); } catch { /* 忽略 */ }
+    if (bridge?.askNotify) {
+      bridge.askNotify();
+      return;
+    }
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        /* 忽略 */
       }
+    }
+  }
+
+  async function toggleClass(next: boolean) {
+    setNotifyClass(next);
+    await getKV().set('notifyClass', next);
+    if (next) {
+      await ensureNotifyPermission();
       void syncReminders();
     }
-    setNote(next ? '已开启系统通知' : '已关闭系统通知');
+    setNote(next ? '已开启课前提醒' : '已关闭课前提醒');
+    setTimeout(() => setNote(''), 2500);
+  }
+
+  async function toggleNews(next: boolean) {
+    setNotifyNews(next);
+    await getKV().set('notifyNews', next);
+    if (next) await ensureNotifyPermission();
+    setNote(next ? '已开启资讯通知' : '已关闭资讯通知');
     setTimeout(() => setNote(''), 2500);
   }
 
   /** 有新通知时弹一条系统通知；同一天只弹一次，且必须用户自己开了开关。 */
   async function notifyFresh(d: TodayDigest) {
-    if (!notifyOn) return;
+    if (!notifyNews) return;
     const day = todayShanghai();
     if ((await getKV().get<string>('notifyDay')) === day) return;
     await getKV().set('notifyDay', day);
@@ -533,10 +556,18 @@ function App() {
           <label class="row" style="align-items:center;gap:8px">
             <input
               type="checkbox"
-              checked={notifyOn}
-              onChange={(e) => void toggleNotify((e.target as HTMLInputElement).checked)}
+              checked={notifyClass}
+              onChange={(e) => void toggleClass((e.target as HTMLInputElement).checked)}
             />
-            <span>开启系统通知（课前 30 分钟提醒，有新通知时提醒一次）</span>
+            <span>课前提醒（上课前 30 分钟，连着上的课合成一条）</span>
+          </label>
+          <label class="row" style="align-items:center;gap:8px">
+            <input
+              type="checkbox"
+              checked={notifyNews}
+              onChange={(e) => void toggleNews((e.target as HTMLInputElement).checked)}
+            />
+            <span>资讯通知（有新通知时提醒一次）</span>
           </label>
           <p class="hint">
             当前状态：教务 {jwxt?.present ? (jwxt.valid ? jwxt.remainingText : '已过期') : '未导入'} · 门户{' '}
