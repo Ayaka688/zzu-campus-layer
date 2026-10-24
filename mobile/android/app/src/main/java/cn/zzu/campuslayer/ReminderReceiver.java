@@ -23,16 +23,18 @@ public class ReminderReceiver extends BroadcastReceiver {
                     CHANNEL_ID, "上课提醒", NotificationManager.IMPORTANCE_HIGH);
             nm.createNotificationChannel(ch);
         }
-        Notification n = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+        Notification.Builder b = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 ? new Notification.Builder(ctx, CHANNEL_ID)
                 : new Notification.Builder(ctx);
-        n.setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title == null ? "校园信息层" : title)
-                .setContentText(body == null ? "" : body)
-                .setStyle(new Notification.BigTextStyle().bigText(body == null ? "" : body))
+        String safeTitle = title == null ? "校园信息层" : title;
+        String safeBody = body == null ? "" : body;
+        b.setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(safeTitle)
+                .setContentText(safeBody)
+                .setStyle(new Notification.BigTextStyle().bigText(safeBody))
                 .setAutoCancel(true);
         try {
-            nm.notify((int) (System.currentTimeMillis() & 0x7fffffff), n);
+            nm.notify((int) (System.currentTimeMillis() & 0x7fffffff), b.build());
         } catch (SecurityException ignored) {
             /* 没有通知权限就算了，页面那边也有开关 */
         }
