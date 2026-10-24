@@ -421,6 +421,9 @@ function App() {
               <p class="hint">
                 <strong>办法二：「豫见郑大」App 分享链接</strong>（鸿蒙版可用）：App 里任意页面 → 分享 / 复制链接 → 粘到下面。
               </p>
+              <p class="hint">
+                装了<strong>安卓壳</strong>的话最省事：在壳里点菜单「登录」，登录完自动灌进来，<strong>不用复制任何东西</strong>。
+              </p>
             </>
           )}
           <textarea
