@@ -899,3 +899,104 @@ header .mark {
   font-weight: 700 !important;
   padding: 8px 8px !important;
 }
+
+
+/* ===== 收尾 2：城堡上移贴交界；通知改黑字；按 QQ 用「深浅色块 + 细线」分区 ===== */
+.dock {
+  overflow: visible !important;
+}
+
+.dock .deco {
+  top: auto !important;
+  bottom: 100% !important;
+  right: 0 !important;
+  width: 33% !important;
+  z-index: 0 !important;
+}
+
+.dock .quick,
+.dock .composer {
+  z-index: 2 !important;
+}
+
+/* 通知：文字全部压成墨色（原来是主题浅色字，在米白上几乎看不见） */
+.nb,
+.nb * {
+  color: var(--text) !important;
+}
+
+.nb-head,
+.nb-head-title,
+.nb-title,
+.nb-sum,
+.nb-meta,
+.nb-src,
+.nb-sub,
+.nb-subs,
+.nb-detail {
+  color: var(--text) !important;
+}
+
+.nb-hint,
+.nb-readtag,
+.nb-empty {
+  color: var(--dim) !important;
+}
+
+/* 通知列表：浅一档的卡片 + 细线分隔，模仿 QQ 的区块感 */
+.nb-list {
+  background: transparent !important;
+}
+
+.nb-card-top,
+.nb .nb-list > * {
+  background: #fbf6e9 !important;
+  border: 0 !important;
+  border-bottom: 1px solid #e2d3ad !important;
+  border-radius: 0 !important;
+  padding: 10px 2px !important;
+}
+
+/* 分类标签、排序标签、按钮：去掉原来那圈浅色外环，只保留文字与细下划线 */
+.nb-tab,
+.nb-mini,
+.nb-btn {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  padding: 4px 8px !important;
+}
+
+.nb-tab + .nb-tab,
+.nb-btn + .nb-btn,
+.nb-mini + .nb-mini {
+  border-left: 1px solid #e2d3ad !important;
+}
+
+.nb-tabs,
+.nb-actions,
+.nb-subs {
+  border-bottom: 1px solid #e2d3ad !important;
+  padding-bottom: 4px !important;
+}
+
+.nb-today {
+  border: 0 !important;
+  border-bottom: 1px solid #e2d3ad !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+/* 头部（通知 / 教务 6 小时）也跟着变成细线分区 */
+header {
+  border-bottom: 1px solid #e2d3ad !important;
+  padding-bottom: 6px !important;
+}
+
+header .chip + .chip,
+header .mini + .chip,
+header .chip + .mini {
+  border-left: 1px solid #e2d3ad !important;
+  padding-left: 10px !important;
+}
