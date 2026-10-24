@@ -48,7 +48,9 @@ interface Message {
 
 const CAS_LOGIN =
   'https://cas.s.zzu.edu.cn/cas/login?service=' +
-  encodeURIComponent('https://uniapp.s.zzu.edu.cn/pages/tab/index/index');
+  // 故意指到门户的一个静态样式文件：CAS 只按 host 白名单放行，
+  // 而静态文件不会启动那个 uni-app SPA —— SPA 一启动就会把 ?ticket= 从地址栏抹掉。
+  encodeURIComponent('https://uniapp.s.zzu.edu.cn/static/index.a5c69d49.css');
 
 const QUICK: Array<{ label: string; text: string }> = [
   { label: '明天有课吗', text: '明天有课吗' },
@@ -386,7 +388,7 @@ function App() {
             安卓版 App 自带菜单里那个「复制链接」是坏的（剪贴板不变），试试<strong>系统级分享</strong>：长按页面或点右上角分享 → 选「复制链接」/ 发到微信再复制。
           </p>
           <p class="hint">
-            <strong>办法二：点按钮去门户登录（登录完地址栏会带 ticket，我们能解）</strong>
+            <strong>办法二：点按钮去登录，登录完地址栏里就有 ticket（我们本地能解）</strong>
           </p>
           <p class="row">
             <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
@@ -394,11 +396,12 @@ function App() {
             </a>
           </p>
           <p class="hint">
-            它去的是<strong>统一身份认证</strong>（不是树维那个登录页）。登录成功后有两种落点，<strong>两种都能粘</strong>：
-            <br />· 跳回门户首页，地址栏变成 <code>…/pages/tab/index/index?ticket=eyJ…</code> → 长按地址栏复制整条网址；
-            <br />· 跳到「教学管理平台」且地址栏带 <code>idToken=eyJ…</code> → 同样复制整条网址。
-            <br /><strong>ticket 里就装着 idToken</strong>（学校 App 自己也是这么解的），粘进来我们本地解出来，不需要联网换。
-            <br />· 万一落回<strong>树维登录页</strong>（无痕/新设备上偶尔）→ 回本页<strong>再点一次</strong>（此时 CAS 会话已在），或者改用办法一。
+            它去的是<strong>统一身份认证</strong>（不是树维那个登录页）。登录成功后你会看到<strong>一屏代码/样式文本</strong>——这是故意的：
+            CAS 会把地址跳到一个<strong>静态样式文件</strong>上，这样页面不会启动门户那套单页应用，也就没人去把 <code>?ticket=</code> 从地址栏里抹掉。
+            <br />· 这时<strong>长按地址栏 → 复制整条网址</strong>（形如 <code>…/static/index.a5c69d49.css?ticket=eyJ…</code>），粘到下面保存即可。
+            <br />· <strong>ticket 本身就是 JWT，里面装着 idToken</strong>（学校 App 自己也是这么解的），我们本地解出来，不需要联网换票。
+            <br />· 如果看到的是 404，<strong>也照样复制</strong>——地址栏里的 ticket 才是我们要的。
+            <br />· 万一落回<strong>树维登录页</strong> → 回本页<strong>再点一次</strong>（此时 CAS 会话已在），或者改用办法一。
           </p>
           <p class="hint">
             ⚠️ 别直接打开 <code>cas.s.zzu.edu.cn</code> 根地址（没有 service 参数会 404），也别在教务站里输学校账号（那页是树维的，不认统一身份认证）。
