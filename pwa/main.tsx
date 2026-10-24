@@ -381,14 +381,7 @@ function App() {
       {sheet === 'login' && (
         <section class="sheet">
           <p class="hint">
-            <strong>办法一：用「豫见郑大」App 的分享链接（实测最可靠，不依赖浏览器缓存）</strong>
-          </p>
-          <p class="hint">
-            在 App 里打开任意页面 → 用「复制链接 / 分享 → 复制链接」，把链接粘到下面。<strong>鸿蒙版实测可用</strong>；
-            安卓版 App 自带菜单里那个「复制链接」是坏的（剪贴板不变），试试<strong>系统级分享</strong>：长按页面或点右上角分享 → 选「复制链接」/ 发到微信再复制。
-          </p>
-          <p class="hint">
-            <strong>办法二：点按钮去登录，登录完地址栏里就有 ticket（我们本地能解）</strong>
+            <strong>主路径：点下面的按钮去登录，登录完地址栏里就有 ticket（我们本地解码）</strong>
           </p>
           <p class="row">
             <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
@@ -407,7 +400,13 @@ function App() {
             ⚠️ 别直接打开 <code>cas.s.zzu.edu.cn</code> 根地址（没有 service 参数会 404），也别在教务站里输学校账号（那页是树维的，不认统一身份认证）。
           </p>
           <p class="hint">
-            <strong>办法三：电脑同步（最稳）。</strong>电脑装扩展 → 侧边栏 ⚙ →「生成手机同步码」→ 把那段码发到手机粘进来（一张教务票 30 天）。
+            <strong>备用：用「豫见郑大」App 的分享链接。</strong>
+            App 里任意页面 → 分享 / 复制链接 → 粘到下面。<strong>鸿蒙版实测可用</strong>；安卓版 App 自带「复制链接」是坏的（剪贴板不变），
+            可试系统级分享（长按页面 / 发到微信再复制）。
+          </p>
+          <p class="hint">
+            已经手里有同步码 / 分享码（<code>#code=…</code>）的，也一样粘进来就能用——只是<strong>不再推荐</strong>「先去电脑上弄一个」，
+            因为教务系统在电脑浏览器里常常登不进去。
           </p>
           <textarea
             rows={4}
