@@ -7,14 +7,25 @@
  * 原因：assets 文件名带 hash 不会变内容，缓起来最划算；但 index.html 决定这次要用哪套 assets，
  * 一旦被永久缓存，新部署的代码就永远进不来——安卓壳里尤其明显（它就是一个长期不关的 WebView）。
  */
-const CACHE = 'campus-layer-v3';
+const CACHE = 'campus-layer-v4';
 const SCOPE = self.registration ? self.registration.scope : '/';
-const SHELL = ['index.html', 'pwa.webmanifest', '../icons/icon-192.png', '../icons/icon-512.png', '../map/campus.jpg'].map(
+/*
+ * 预缓存清单：只放**仓库里一定存在**的文件。
+ * 以前这里还列了 ../map/campus.jpg，但那张地图是学校版权素材、仓库里默认不带，
+ * 于是 cache.addAll 整个失败（它是原子的），离线壳一次都没装上过。
+ * 现在改成逐个 add + allSettled：缺哪个都不影响其它文件。
+ */
+const SHELL = ['index.html', 'pwa.webmanifest', '../icons/icon-192.png', '../icons/icon-512.png'].map(
   (p) => new URL(p, SCOPE).href,
 );
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => undefined));
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((c) => Promise.allSettled(SHELL.map((u) => c.add(u))))
+      .catch(() => undefined),
+  );
   self.skipWaiting();
 });
 

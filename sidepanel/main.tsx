@@ -1,10 +1,20 @@
 import { render } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { LlmFields } from '../src/ui/llm-fields';
 import { HoldButton } from '../src/ui/hold';
+import { Toast, type ToastState } from '../src/ui/toast';
+import { QuickAskBar, QuickAskEditor } from '../src/ui/quick-asks';
 import { CampusMap, RichText, download } from '../src/ui/rich';
+import {
+  defaultQuickAsks,
+  loadQuickAsks,
+  resetQuickAsks,
+  saveQuickAsks,
+  type QuickAsk,
+} from '../src/core/quickAsk';
 import { NoticeBoard, NoticeTodayCard } from '../src/ui/notice';
 import { noticesToIcs } from '../src/core/ics';
+import { loadTranscript, saveTranscript, trimTranscript } from '../src/core/transcript';
 import type { NoticeCard, TodayDigest } from '../src/core/notice';
 import { NOTICE_CATEGORIES, type NoticeCategory } from '../src/core/noticeRules';
 import {
@@ -53,14 +63,7 @@ function send<T = unknown>(message: unknown): Promise<Reply<T>> {
   return chrome.runtime.sendMessage(message) as Promise<Reply<T>>;
 }
 
-const QUICK: Array<{ label: string; text: string }> = [
-  { label: '本周课表', text: '这周课表' },
-  { label: '明天有课吗', text: '明天有课吗' },
-  { label: '今天空教室', text: '今天上午的空教室' },
-  { label: '今天有什么讲座', text: '今天有什么讲座' },
-  { label: '最新通知', text: '最近的通知' },
-  { label: '导出日历', text: '把课表导出成日历' },
-];
+/* 常用语列表（可编辑）放在 src/core/quickAsk.ts，侧边栏与手机 PWA 共用同一份逻辑。 */
 
 function App() {
   const [statuses, setStatuses] = useState<TokenStatus[]>([]);
@@ -74,6 +77,11 @@ function App() {
     model: 'DeepSeek-R1',
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /* 面板切换方向：fwd = 新面板从右边滑进来，back = 退回时从左边滑回来 */
+  const [navDir, setNavDir] = useState<'fwd' | 'back'>('fwd');
+  /* 首屏不滑，免得一打开面板就动一下 */
+  const [booted, setBooted] = useState(false);
+  useEffect(() => setBooted(true), []);
   const [saveNote, setSaveNote] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -88,14 +96,32 @@ function App() {
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
+  /* 输入框上面那排常用语：可加、可删、可上下挪 */
+  const [quickAsks, setQuickAsks] = useState<QuickAsk[]>(defaultQuickAsks);
+  const [quickEditing, setQuickEditing] = useState(false);
   /** 从系统通知点进来的那张卡：切到时间线并高亮 */
   const [focusId, setFocusId] = useState('');
+  /** 预约这类「等系统回执」的动作，结果用浮层气泡报，不混在聊天流里 */
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const dismissToast = useCallback(() => setToast(null), []);
   const [today] = useState(todayShanghai());
   const bottom = useRef<HTMLDivElement | null>(null);
+  /* 存档读完之前别回写，否则会用空列表把上次的记录覆盖掉 */
+  const hydrated = useRef(false);
 
   async function refreshStatus() {
     const res = await send<TokenStatus[]>({ type: 'status' });
     if (res.ok && res.data) setStatuses(res.data);
+  }
+
+  /** 常用语变了：界面先换，再异步落库（chrome.storage.local）。 */
+  function patchQuickAsks(next: QuickAsk[]): void {
+    setQuickAsks(next);
+    void saveQuickAsks(next).catch(() => undefined);
+  }
+
+  async function resetQuickAskList(): Promise<void> {
+    setQuickAsks(await resetQuickAsks());
   }
 
   /**
@@ -152,6 +178,12 @@ function App() {
   useEffect(() => {
     void refreshStatus();
     void getNoticePrefs().then(setNoticePrefsState);
+    void loadQuickAsks().then(setQuickAsks);
+    // 上次聊的那几条带回来：关掉侧栏、点进别的页面再回来，不该从空白开始
+    void loadTranscript<Message>().then((items) => {
+      setMessages(items);
+      hydrated.current = true;
+    });
     void send<LlmSettings>({ type: 'settings:get' }).then((res) => {
       if (res.ok && res.data) {
         setSettings(res.data);
@@ -171,6 +203,15 @@ function App() {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy]);
 
+  /* 每次聊完落一次盘：只留最近 5 条，重字段在 transcript.ts 里洗掉 */
+  useEffect(() => {
+    if (!hydrated.current) return;
+    const timer = setTimeout(() => {
+      void saveTranscript(messages).catch(() => undefined);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [messages]);
+
   // 登录态一到位就顺手拉一次通知（今日卡片要显示），否则等用户点「通知」再拉
   const ready = statuses.some((s) => (s.source === 'jwxt' || s.source === 'portal') && s.valid);
   useEffect(() => {
@@ -182,12 +223,14 @@ function App() {
   useEffect(() => {
     void takeNoticeFocus().then((id) => {
       if (!id) return;
+      setNavDir('fwd');
       setView('notices');
       setFocusId(id);
     });
     const onMessage = (message: unknown) => {
       const msg = message as { type?: string; id?: string };
       if (msg?.type !== 'notice:focus') return;
+      setNavDir('fwd');
       setView('notices');
       if (msg.id) setFocusId(msg.id);
     };
@@ -198,7 +241,7 @@ function App() {
   async function submit(text: string) {
     const question = text.trim();
     if (!question || busy) return;
-    setMessages((m) => [...m, { role: 'user', text: question }]);
+    setMessages((m) => trimTranscript([...m, { role: 'user', text: question }]));
     setInput('');
     setBusy(true);
     try {
@@ -220,23 +263,25 @@ function App() {
           .map((m) => ({ role: m.role, content: m.text })),
       });
       if (res.ok && res.data) {
-        setMessages((m) => [
-          ...m,
-          {
-            role: 'assistant',
-            text: res.data!.text,
-            ...(res.data!.tool ? { tool: res.data!.tool } : {}),
-            ...(res.data!.data ? { data: res.data!.data } : {}),
-            ...(res.data!.via ? { via: res.data!.via } : {}),
-            ...(res.data!.steps ? { steps: res.data!.steps } : {}),
-            ...(res.data!.llmError ? { llmError: res.data!.llmError } : {}),
-          },
-        ]);
+        setMessages((m) =>
+          trimTranscript([
+            ...m,
+            {
+              role: 'assistant',
+              text: res.data!.text,
+              ...(res.data!.tool ? { tool: res.data!.tool } : {}),
+              ...(res.data!.data ? { data: res.data!.data } : {}),
+              ...(res.data!.via ? { via: res.data!.via } : {}),
+              ...(res.data!.steps ? { steps: res.data!.steps } : {}),
+              ...(res.data!.llmError ? { llmError: res.data!.llmError } : {}),
+            },
+          ]),
+        );
       } else {
-        setMessages((m) => [...m, { role: 'assistant', text: res.error ?? '没有拿到结果', error: true }]);
+        setMessages((m) => trimTranscript([...m, { role: 'assistant', text: res.error ?? '没有拿到结果', error: true }]));
       }
     } catch (e) {
-      setMessages((m) => [...m, { role: 'assistant', text: String(e), error: true }]);
+      setMessages((m) => trimTranscript([...m, { role: 'assistant', text: String(e), error: true }]));
     } finally {
       setBusy(false);
     }
@@ -310,6 +355,9 @@ function App() {
     }
   }
 
+  /** 面板进出动画用的类名：开新面板从右边滑入，退回从左边滑入 */
+  const slide = booted ? (navDir === 'fwd' ? ' slide-in-right' : ' slide-in-left') : '';
+
   return (
     <div class="app">
       <header>
@@ -321,9 +369,11 @@ function App() {
           aria-label={view === 'notices' ? '回到问答' : '通知时间线'}
           onClick={() => {
             if (view === 'notices') {
+              setNavDir('back');
               setView('chat');
               return;
             }
+            setNavDir('fwd');
             setView('notices');
             setFocusId('');
             if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
@@ -335,7 +385,11 @@ function App() {
           class={`gear${settingsOpen ? ' on' : ''}`}
           title="设置"
           aria-label="设置"
-          onClick={() => setSettingsOpen((v) => !v)}
+          onClick={() => {
+            const open = !settingsOpen;
+            setNavDir(open ? 'fwd' : 'back');
+            setSettingsOpen(open);
+          }}
         >
           ⚙
         </button>
@@ -350,7 +404,7 @@ function App() {
       </header>
 
       {settingsOpen && (
-        <section class="settings">
+        <section class={`settings${slide}`} key="settings">
           <LlmFields value={settings} onChange={(patch) => void saveSettings(patch)} />
           <div class="row">
             <button class="mini" onClick={() => void syncKey()} disabled={syncing}>
@@ -386,7 +440,7 @@ function App() {
       )}
 
       {view === 'notices' ? (
-        <main class="notices-main">
+        <main class={`notices-main${slide}`} key="notices">
           <NoticeBoard
             cards={noticeCards}
             digest={noticeDigest}
@@ -403,9 +457,16 @@ function App() {
           />
         </main>
       ) : (
-        <main>
+        <main class={slide.trim()} key="chat">
           {noticeDigest && (
-            <NoticeTodayCard digest={noticeDigest} loading={noticeBusy} onOpen={() => setView('notices')} />
+            <NoticeTodayCard
+              digest={noticeDigest}
+              loading={noticeBusy}
+              onOpen={() => {
+                setNavDir('fwd');
+                setView('notices');
+              }}
+            />
           )}
         {messages.length === 0 && (
           <div class="empty">
@@ -455,12 +516,31 @@ function App() {
                       type: 'lib:book',
                       args: { areaId: action.areaId, date: action.date, seatNo: action.seatNo },
                     });
-                    setMessages((prev) => [
-                      ...prev,
-                      res.ok && res.data
-                        ? { role: 'assistant', text: res.data.text, ...(res.data.data ? { data: res.data.data } : {}) }
-                        : { role: 'assistant', text: res.error ?? '下单失败', error: true },
-                    ]);
+                    const toast = (res.data?.data as { toast?: { kind?: string; title?: string; detail?: string } } | undefined)?.toast;
+                    if (res.ok && toast?.title) {
+                      setToast({
+                        kind: toast.kind === 'ok' ? 'ok' : toast.kind === 'warn' ? 'warn' : 'bad',
+                        title: toast.title,
+                        detail: toast.detail ?? '',
+                        id: Date.now(),
+                      });
+                    } else {
+                      // 连回执都没拿到（页面没回应等）：也算没约上，别让人以为成功了
+                      setToast({
+                        kind: 'bad',
+                        title: '没约上',
+                        detail: res.error ?? '没拿到图书馆系统的任何回应，这次不算数。',
+                        id: Date.now(),
+                      });
+                    }
+                    setMessages((prev) =>
+                      trimTranscript([
+                        ...prev,
+                        res.ok && res.data
+                          ? { role: 'assistant', text: res.data.text, ...(res.data.data ? { data: res.data.data } : {}) }
+                          : { role: 'assistant', text: res.error ?? '下单失败', error: true },
+                      ]),
+                    );
                   }}
                 />
               )}
@@ -504,13 +584,24 @@ function App() {
 
       {view === 'chat' && (
         <>
-          <div class="quick">
-            {QUICK.map((q) => (
-              <button key={q.label} onClick={() => void submit(q.text)} disabled={busy}>
-                {q.label}
-              </button>
-            ))}
-          </div>
+          {quickEditing && (
+            <QuickAskEditor
+              items={quickAsks}
+              onChange={patchQuickAsks}
+              onClose={() => setQuickEditing(false)}
+              onReset={() => void resetQuickAskList()}
+            />
+          )}
+          <QuickAskBar
+            items={quickAsks}
+            disabled={busy}
+            editing={quickEditing}
+            onEdit={() => setQuickEditing((v) => !v)}
+            onPick={(text) => {
+              setQuickEditing(false);
+              void submit(text);
+            }}
+          />
 
           <form
             class="composer"
@@ -531,6 +622,8 @@ function App() {
           </form>
         </>
       )}
+
+      <Toast toast={toast} onClose={dismissToast} />
     </div>
   );
 }

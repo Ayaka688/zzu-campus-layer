@@ -13,6 +13,10 @@ dist/
 .pwa-login.png
 .pwa-schedule.png
 .pwa-answer.png
+.pwa-quick-*.png
+.pwa-transcript-*.png
+.sp-profile/
+.sp-*.png
 *.log
 
 # 本地私货：千万别提交

@@ -17,8 +17,17 @@ import {
   type TokenStatus,
 } from '../src/core/storage';
 import { LlmFields } from '../src/ui/llm-fields';
+import { QuickAskBar, QuickAskEditor } from '../src/ui/quick-asks';
 import { CampusMap, RichText, download } from '../src/ui/rich';
+import {
+  defaultQuickAsks,
+  loadQuickAsks,
+  resetQuickAsks,
+  saveQuickAsks,
+  type QuickAsk,
+} from '../src/core/quickAsk';
 import { noticesToIcs } from '../src/core/ics';
+import { loadTranscript, saveTranscript, trimTranscript } from '../src/core/transcript';
 import type { NoticeCard, TodayDigest } from '../src/core/notice';
 import { NOTICE_CATEGORIES, type NoticeCategory } from '../src/core/noticeRules';
 import {
@@ -56,15 +65,8 @@ const CAS_LOGIN_PORTAL =
   'https://cas.s.zzu.edu.cn/cas/login?service=' +
   encodeURIComponent('https://uniapp.s.zzu.edu.cn/pages/tab/index/index');
 
-const QUICK: Array<{ label: string; text: string }> = [
-  { label: '明天有课吗', text: '明天有课吗' },
-  { label: '本周课表', text: '这周课表' },
-  { label: '今天的空教室', text: '今天上午的空教室' },
-  { label: '今天有什么讲座', text: '今天有什么讲座' },
-  { label: '最新通知', text: '最近的通知' },
-  { label: '卡里余额', text: '我卡里还有多少钱' },
-  { label: '导出日历', text: '把课表导出成日历' },
-];
+/* 常用语改成可编辑列表（原来写死在 QUICK 里）：存 kv，改动立刻落盘。
+   初始值先用出厂的，等 refresh() 读到用户自己的列表再替换，避免闪一下空条。 */
 
 function App() {
   const [statuses, setStatuses] = useState<TokenStatus[]>([]);
@@ -72,6 +74,11 @@ function App() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [sheet, setSheet] = useState<'none' | 'login'>('none');
+  /* 面板切换方向：fwd = 新面板从右边滑进来，back = 退回时从左边滑回来 */
+  const [navDir, setNavDir] = useState<'fwd' | 'back'>('fwd');
+  /* 首屏不滑，免得一进页面就动一下 */
+  const [booted, setBooted] = useState(false);
+  useEffect(() => setBooted(true), []);
   /* 在安卓壳里（壳注入了 CampusNotify）登录由原生菜单接管，不需要用户复制地址 */
   const inShell = typeof (window as unknown as { CampusNotify?: unknown }).CampusNotify !== 'undefined';
   const [paste, setPaste] = useState('');
@@ -103,8 +110,13 @@ function App() {
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
+  /* 输入框上面那排常用语：可加、可删、可上下挪，自己维护顺序 */
+  const [quickAsks, setQuickAsks] = useState<QuickAsk[]>(defaultQuickAsks);
+  const [quickEditing, setQuickEditing] = useState(false);
   const [today] = useState(todayShanghai());
   const bottom = useRef<HTMLDivElement | null>(null);
+  /* refresh() 读完存档之前别回写，否则会用空列表把上次的记录覆盖掉 */
+  const hydrated = useRef(false);
   const isHttps = typeof location !== 'undefined' && location.protocol === 'https:';
 
   async function refresh() {
@@ -119,6 +131,20 @@ function App() {
       const newsPref = await getKV().get<boolean>('notifyNews');
       setNotifyClass(classPref !== false);
       setNotifyNews(newsPref === true);
+      setQuickAsks(await loadQuickAsks());
+      // 上次聊的那几条带回来：换页面/重开不该从空白开始
+      setMessages(await loadTranscript<Message>());
+      hydrated.current = true;
+  }
+
+  /** 常用语变了：先把界面换掉（点一下就有反应），再异步落库。 */
+  function patchQuickAsks(next: QuickAsk[]): void {
+    setQuickAsks(next);
+    void saveQuickAsks(next).catch(() => undefined);
+  }
+
+  async function resetQuickAskList(): Promise<void> {
+    setQuickAsks(await resetQuickAsks());
   }
 
   /** 手机端直接跑工具（没有 background），卡片管线与桌面完全同一条。 */
@@ -183,6 +209,15 @@ function App() {
     bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, busy]);
 
+  /* 每次聊完落一次盘：只留最近 5 条，重字段在 transcript.ts 里洗掉 */
+  useEffect(() => {
+    if (!hydrated.current) return;
+    const timer = setTimeout(() => {
+      void saveTranscript(messages).catch(() => undefined);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [messages]);
+
   const jwxt = statuses.find((s) => s.source === 'jwxt');
   const portal = statuses.find((s) => s.source === 'portal');
   const ready = Boolean(jwxt?.valid || portal?.valid);
@@ -207,16 +242,19 @@ function App() {
   async function submit(text: string) {
     const question = text.trim();
     if (!question || busy) return;
-    setMessages((m) => [...m, { role: 'user', text: question }]);
+    setMessages((m) => trimTranscript([...m, { role: 'user', text: question }]));
     setInput('');
     setBusy(true);
     try {
       const session = await loadSession();
       if (!session.jwxtToken && !session.portalToken) {
-        setMessages((m) => [
-          ...m,
-          { role: 'assistant', text: '还没有登录态：点右上角「登录态」，从电脑上的扩展面板复制一段码粘进来。', error: true },
-        ]);
+        setMessages((m) =>
+          trimTranscript([
+            ...m,
+            { role: 'assistant', text: '还没有登录态：点右上角「登录态」，从电脑上的扩展面板复制一段码粘进来。', error: true },
+          ]),
+        );
+        setNavDir('fwd');
         setSheet('login');
         return;
       }
@@ -228,21 +266,23 @@ function App() {
           .filter((m) => m.text.trim())
           .map((m) => ({ role: m.role, content: m.text })),
       });
-      setMessages((m) => [
-        ...m,
-        {
-          role: 'assistant',
-          text: res.text,
-          ...(res.tool ? { tool: res.tool } : {}),
-          ...(res.data ? { data: res.data } : {}),
-          ...(res.via ? { via: res.via } : {}),
-          ...(res.steps ? { steps: res.steps } : {}),
-          ...(res.llmError ? { llmError: res.llmError } : {}),
-          ...(res.error ? { error: true } : {}),
-        },
-      ]);
+      setMessages((m) =>
+        trimTranscript([
+          ...m,
+          {
+            role: 'assistant',
+            text: res.text,
+            ...(res.tool ? { tool: res.tool } : {}),
+            ...(res.data ? { data: res.data } : {}),
+            ...(res.via ? { via: res.via } : {}),
+            ...(res.steps ? { steps: res.steps } : {}),
+            ...(res.llmError ? { llmError: res.llmError } : {}),
+            ...(res.error ? { error: true } : {}),
+          },
+        ]),
+      );
     } catch (e) {
-      setMessages((m) => [...m, { role: 'assistant', text: String(e), error: true }]);
+      setMessages((m) => trimTranscript([...m, { role: 'assistant', text: String(e), error: true }]));
     } finally {
       setBusy(false);
     }
@@ -460,6 +500,9 @@ function App() {
     setTimeout(() => setNote(''), 3000);
   }
 
+  /** 面板进出动画用的类名：开新面板从右边滑入，退回从左边滑入 */
+  const slide = booted ? (navDir === 'fwd' ? ' slide-in-right' : ' slide-in-left') : '';
+
   return (
     <div class="app">
       <header>
@@ -479,23 +522,32 @@ function App() {
             class={`chip${view === 'notices' ? ' on' : ''}`}
             onClick={() => {
               if (view === 'notices') {
+                setNavDir('back');
                 setView('chat');
                 return;
               }
+              setNavDir('fwd');
               setView('notices');
               if (noticeCards.length === 0 && !noticeBusy) void loadNotices();
             }}
           >
             {view === 'notices' ? '问答' : '通知'}
           </button>
-          <button class="chip" onClick={() => setSheet(sheet === 'login' ? 'none' : 'login')}>
+          <button
+            class="chip"
+            onClick={() => {
+              const open = sheet === 'login';
+              setNavDir(open ? 'back' : 'fwd');
+              setSheet(open ? 'none' : 'login');
+            }}
+          >
             {ready ? `教务 ${jwxt?.remainingText ?? '—'}` : '登录态'}
           </button>
         </div>
       </header>
 
       {sheet === 'login' && (
-        <section class="sheet">
+        <section class={`sheet${slide}`} key="login">
           {inShell ? (
             <>
               <p class="hint">
@@ -619,7 +671,7 @@ function App() {
       )}
 
       {view === 'notices' ? (
-        <main class="notices-main">
+        <main class={`notices-main${slide}`} key="notices">
           <NoticeBoard
             cards={noticeCards}
             digest={noticeDigest}
@@ -635,7 +687,7 @@ function App() {
           />
         </main>
       ) : (
-        <main>
+        <main class={slide.trim()} key="chat">
         
         {messages.map((m, i) => (
           <div class={`msg ${m.role}`} key={`${i}-${m.role}`}>
@@ -683,13 +735,24 @@ function App() {
         <>
           <div class="dock">
         <img class="deco" src="./deco.png" alt="" aria-hidden="true" />
-        <div class="quick">
-            {QUICK.map((q) => (
-              <button key={q.label} onClick={() => void submit(q.text)} disabled={busy}>
-                {q.label}
-              </button>
-            ))}
-          </div>
+        {quickEditing && (
+          <QuickAskEditor
+            items={quickAsks}
+            onChange={patchQuickAsks}
+            onClose={() => setQuickEditing(false)}
+            onReset={() => void resetQuickAskList()}
+          />
+        )}
+        <QuickAskBar
+          items={quickAsks}
+          disabled={busy}
+          editing={quickEditing}
+          onEdit={() => setQuickEditing((v) => !v)}
+          onPick={(text) => {
+            setQuickEditing(false);
+            void submit(text);
+          }}
+        />
 
           <form
             class="composer"

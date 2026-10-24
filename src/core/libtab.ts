@@ -10,6 +10,7 @@
  */
 
 import { parseSeatMap, type LibSeatMap } from './library';
+import type { BookOutcome } from './libBook';
 
 const LIB_URL_PATTERN = 'http://order.lib.zzu.edu.cn/*';
 
@@ -150,10 +151,10 @@ export async function bookLibrarySeat(args: {
   areaId: string;
   date: string;
   seatNo: string;
-}): Promise<LibTabResult<{ verified?: boolean; note?: string }>> {
+}): Promise<LibTabResult<BookOutcome>> {
   const tab = await findLibraryTab();
   if (!tab?.id) return { ok: false, error: '没有打开图书馆预约页面，没法代你下单。' };
-  const res = await send<{ verified?: boolean; note?: string }>(tab.id, 'lib:book', args);
+  const res = await send<BookOutcome>(tab.id, 'lib:book', args);
   if (!res.ok) return { ok: false, error: res.error ?? '下单失败' };
   return { ok: true, data: res.data };
 }
