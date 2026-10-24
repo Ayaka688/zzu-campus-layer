@@ -634,3 +634,160 @@ p.hint {
 .empty {
   color: var(--dim);
 }
+
+
+/* ===== 极简米白：去掉所有分区线与顶部蓝底，宋体加粗，输入区用更深的米色隔开 ===== */
+:root {
+  --bg: #f4ebd7;
+  --panel: #f4ebd7;
+  --input: #e6d9bb;
+  --line: #f4ebd7;
+  --text: #14181f;
+  --dim: #6b6250;
+  --accent: #1b4fd8;
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Songti SC', 'SimSun', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC', serif;
+  font-weight: 600;
+}
+
+h1,
+h2,
+h3,
+header h1,
+.bubble,
+.composer input,
+.composer button,
+.quick button,
+header .chip,
+header .mini,
+.sheet,
+.sheet input,
+.sheet textarea,
+.sheet select,
+button.primary,
+a.primary,
+button.ghost,
+a.ghost,
+button.mini {
+  font-family: inherit;
+  font-weight: 600;
+}
+
+/* 顶部：不再是蓝底，也不画线 */
+header {
+  background: transparent !important;
+  color: var(--text) !important;
+  border-bottom: 0 !important;
+  border-top: 0 !important;
+}
+
+header h1 {
+  color: var(--text) !important;
+  font-size: 18px;
+}
+
+header .mark {
+  color: var(--text);
+}
+
+/* 顶部右侧小按钮：纯文字，无线无框 */
+header .chip,
+header .mini {
+  border: 0 !important;
+  border-left: 0 !important;
+  background: transparent !important;
+  color: var(--dim) !important;
+  padding: 2px 6px !important;
+}
+
+/* 快捷问句条：无线无框，只是文字 */
+.quick {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 6px 4px !important;
+}
+
+.quick button {
+  border: 0 !important;
+  border-right: 0 !important;
+  background: transparent !important;
+  color: var(--dim) !important;
+  padding: 4px 10px !important;
+}
+
+/* 气泡：没有描边，靠底色区分 */
+.bubble {
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: #fbf6e9 !important;
+  color: var(--text) !important;
+}
+
+.bubble.me,
+.bubble.user,
+.bubble.user-msg {
+  background: var(--accent) !important;
+  color: #fbf6e9 !important;
+}
+
+/* 输入区：用更深的米色铺一条带子，不画线 */
+.composer {
+  border-top: 0 !important;
+  background: var(--input) !important;
+}
+
+.composer input {
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: #fbf6e9 !important;
+  color: var(--text) !important;
+}
+
+.composer button {
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: var(--accent) !important;
+  color: #fbf6e9 !important;
+}
+
+/* 设置面板：同底色，无下划线 */
+.sheet {
+  background: #f7f0dd !important;
+  border-bottom: 0 !important;
+}
+
+.sheet textarea,
+.sheet input[type='text'],
+.sheet select {
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: #fbf6e9 !important;
+  color: var(--text) !important;
+}
+
+button.primary,
+a.primary {
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: var(--accent) !important;
+  color: #fbf6e9 !important;
+}
+
+button.ghost,
+a.ghost,
+button.mini {
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: #e9dcbe !important;
+  color: var(--text) !important;
+}
+
+.empty {
+  display: none !important;
+}
