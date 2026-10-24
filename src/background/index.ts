@@ -28,6 +28,7 @@ import {
 } from '../core/storage';
 import { mintApiKey, probeLlm, resolveProvider } from '../core/llm';
 import { bookLibrarySeat, findLibraryTab } from '../core/libtab';
+import { describeBook, type BookOutcome } from '../core/libBook';
 import { TOOLS, getNoticeBody, runTool } from '../core/tools';
 
 type Incoming =
@@ -148,15 +149,26 @@ async function handle(message: Incoming): Promise<Reply> {
     }
     case 'lib:book': {
       const out = await bookLibrarySeat(message.args);
-      if (!out.ok) return { ok: false, error: out.error ?? '下单失败' };
-      const d = out.data ?? {};
+      // 连页面都没搭上（没开标签页 / 页面没回应）也走同一套三态文案，
+      // 这样界面永远只用一种方式展示预约结果，不会有的地方是错误气泡、有的地方是普通消息。
+      const outcome: BookOutcome = out.ok
+        ? (out.data ?? { cause: 'no_response' })
+        : {
+            cause: /没打开|没有打开/.test(out.error ?? '') ? 'no_tab' : 'page_dead',
+            seatNo: message.args.seatNo,
+            date: message.args.date,
+            message: out.error,
+          };
+      const copy = describeBook({
+        ...outcome,
+        seatNo: outcome.seatNo ?? message.args.seatNo,
+        date: outcome.date ?? message.args.date,
+      });
       return {
         ok: true,
         data: {
-          text: d.verified
-            ? `座位 **${message.args.seatNo}** 预约成功（页面出现了成功提示）。`
-            : `已经点过确认，但没看到成功提示，请去标签页核对一下座位 ${message.args.seatNo}。`,
-          data: { ...d, seatNo: message.args.seatNo, date: message.args.date },
+          text: copy.text,
+          data: { toast: copy, outcome },
         },
       };
     }
