@@ -12,8 +12,14 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 /**
- * 登录页：在学校自己的页面里完成 CAS 登录（短信/扫码都行），
- * 登录成功那一刻地址栏带 idToken；拿不到就退而读 localStorage。
+ * 壳内登录页。
+ *
+ * 入口指向「CAS + 一个静态样式文件」：CAS 的白名单只按域名匹配，
+ * 静态文件又不会启动门户那套单页应用 —— 单页应用一启动就会把 ?ticket= 从地址里抹掉。
+ * 于是登录成功后 WebView 的地址里会留着 ?ticket=<JWT>，我们在这里就地抓住它，
+ * 交给主页面（PWA）去解码：ticket 的 payload 里就装着 idToken。
+ *
+ * 抓不到 URL 时还有两层兜底：地址里的 idToken=、页面里的 localStorage。
  */
 public class LoginActivity extends Activity {
 
@@ -31,6 +37,7 @@ public class LoginActivity extends Activity {
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
         s.setUserAgentString(AppConfig.USER_AGENT);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
@@ -38,36 +45,63 @@ public class LoginActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                maybeHarvest(url);
+                if (harvestUrl(url)) {
+                    return true;
+                }
                 return false;
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                maybeHarvest(url);
-                // 地址里没有就翻 localStorage（jwxt 的 uni-app 会把 token 存这里）
-                view.evaluateJavascript(
-                        "(function(){try{return localStorage.getItem('idToken')||localStorage.getItem('X-Id-Token')||''}catch(e){return ''}})()",
-                        value -> {
-                            String t = clean(value);
-                            if (isJwt(t)) finishWith(t);
-                        });
+                if (harvestUrl(url)) {
+                    return;
+                }
+                // 最后兜底：有些落点会把 token 存进 localStorage
+                view.evaluateJavascript(SNAPSHOT, value -> {
+                    String raw = clean(value);
+                    if (raw.isEmpty()) {
+                        return;
+                    }
+                    String[] parts = raw.split("\n");
+                    if (parts.length > 0 && harvestUrl(parts[0])) {
+                        return;
+                    }
+                    if (parts.length > 1 && isJwt(parts[1])) {
+                        finishWithPayload(parts[1]);
+                    }
+                });
             }
         });
 
         String start = getIntent().getStringExtra("url");
         web.loadUrl(start == null || start.isEmpty() ? AppConfig.LOGIN_URL : start);
+        Toast.makeText(this, "用学校账号登录，成功后会自动回到应用", Toast.LENGTH_LONG).show();
     }
 
-    private void maybeHarvest(String url) {
-        if (url == null) return;
+    private static final String SNAPSHOT =
+            "(function(){try{return location.href+'\\n'+(localStorage.getItem('idToken')"
+            + "||localStorage.getItem('X-Id-Token')||'')}catch(e){return ''}})()";
+
+    /** 地址里带 ticket / idToken 就当场收工。返回 true 表示已处理。 */
+    private boolean harvestUrl(String url) {
+        if (url == null || done) {
+            return false;
+        }
+
+        // 1) 我们最想要的：?ticket=<JWT>（指向静态样式文件时它会一直留着）
+        if (url.contains("ticket=")) {
+            finishWithPayload(url);
+            return true;
+        }
+
+        // 2) 某些落点直接给 idToken / userToken / token
         try {
             Uri u = Uri.parse(url);
             for (String key : new String[]{"idToken", "userToken", "token"}) {
                 String v = u.getQueryParameter(key);
                 if (isJwt(v)) {
-                    finishWith(v);
-                    return;
+                    finishWithPayload(v);
+                    return true;
                 }
             }
             String frag = u.getFragment();
@@ -76,58 +110,72 @@ public class LoginActivity extends Activity {
                 for (String key : new String[]{"idToken", "userToken", "token"}) {
                     String v = f.getQueryParameter(key);
                     if (isJwt(v)) {
-                        finishWith(v);
-                        return;
+                        finishWithPayload(v);
+                        return true;
                     }
                 }
             }
         } catch (Exception ignored) {
         }
+        return false;
     }
 
-    /** evaluateJavascript 回来的字符串带引号，去掉。 */
     private static String clean(String raw) {
-        if (raw == null) return "";
+        if (raw == null) {
+            return "";
+        }
         String s = raw.trim();
-        if (s.startsWith("\"") && s.endsWith("\"") && s.length() > 1) s = s.substring(1, s.length() - 1);
-        return s;
+        if (s.startsWith("\"") && s.endsWith("\"") && s.length() > 1) {
+            s = s.substring(1, s.length() - 1);
+        }
+        return s.replace("\\n", "\n").replace("\\/", "/");
     }
 
     private static boolean isJwt(String v) {
-        if (v == null) return false;
+        if (v == null) {
+            return false;
+        }
         String s = v.trim();
-        if (s.split("\\.").length != 3) return false;
-        return s.length() > 60;
+        return s.split("\\.").length == 3 && s.length() > 60;
     }
 
-    private void finishWith(String token) {
-        if (done) return;
+    private void finishWithPayload(String payload) {
+        if (done) {
+            return;
+        }
         done = true;
         Intent out = new Intent();
-        out.putExtra("token", token.trim());
+        out.putExtra("payload", payload.trim());
         setResult(RESULT_OK, out);
         finish();
     }
 
     @Override
     public boolean onCreateOptionsMenu(android.view.Menu menu) {
-        menu.add(0, 1, 0, "我已登录，读取");
+        menu.add(0, 1, 0, "我已登录，读取当前页面");
+        menu.add(0, 2, 1, "刷新");
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
         if (item.getItemId() == 1) {
-            web.evaluateJavascript(
-                    "(function(){try{return localStorage.getItem('idToken')||localStorage.getItem('X-Id-Token')||''}catch(e){return ''}})()",
-                    value -> {
-                        String t = clean(value);
-                        if (isJwt(t)) {
-                            finishWith(t);
-                        } else {
-                            Toast.makeText(this, "这个页面里还没看到 idToken，先完成登录", Toast.LENGTH_LONG).show();
-                        }
-                    });
+            web.evaluateJavascript(SNAPSHOT, value -> {
+                String raw = clean(value);
+                String[] parts = raw.split("\n");
+                boolean ok = parts.length > 0 && harvestUrl(parts[0]);
+                if (!ok && parts.length > 1 && isJwt(parts[1])) {
+                    finishWithPayload(parts[1]);
+                    ok = true;
+                }
+                if (!ok) {
+                    Toast.makeText(this, "这个页面里还没看到 ticket，先完成登录", Toast.LENGTH_LONG).show();
+                }
+            });
+            return true;
+        }
+        if (item.getItemId() == 2) {
+            web.reload();
             return true;
         }
         return super.onOptionsItemSelected(item);

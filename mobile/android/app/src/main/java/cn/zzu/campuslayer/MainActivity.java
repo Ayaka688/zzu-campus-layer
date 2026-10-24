@@ -19,13 +19,17 @@ import android.widget.Toast;
 /**
  * 主界面 = 一块 WebView，装的是我们自己的 PWA。
  *
- * 登录刻意不在壳里做：学校的换票链（CAS → jwxt/uniapp → 树维前端）在 WebView 里
- * 会被那个前端判成"内嵌容器"而回落成树维账密页，实测无法稳定复刻。
- * 所以这里只做两件事：
- *   1）「用浏览器登录」——把登录页甩给系统浏览器（那条路已验证可用）；
- *   2）「导入剪贴板」——用户登录后复制的地址栏内容，直接交给 PWA 的 __campusImport 解析。
+ * 登录现在直接在壳里做（菜单第一项「登录（推荐）」）：
+ *   LoginActivity 打开「CAS + 静态样式文件」的入口，登录成功那一刻地址里带着
+ *   ?ticket=<JWT>（ticket 的 payload 里就是 idToken），壳把这个地址原样交给
+ *   页面的 window.__campusImport 去解析、解码、落库。
+ *
+ * 另外还留着两条备选：「从剪贴板导入」（用户在外面复制了带 token 的地址）、
+ * 「用系统浏览器登录」（壳内 CAS 出问题时的兜底）。
  */
 public class MainActivity extends Activity {
+
+    private static final int REQ_LOGIN = 3001;
 
     private WebView web;
 
@@ -64,7 +68,7 @@ public class MainActivity extends Activity {
         if (!getPreferences(MODE_PRIVATE).getBoolean("hinted", false)) {
             getPreferences(MODE_PRIVATE).edit().putBoolean("hinted", true).apply();
             Toast.makeText(this,
-                    "先在系统浏览器里登录一次，再回来点菜单「导入剪贴板」",
+                    "点右上角菜单「登录」，用学校账号登录一次就行——登录完会自动回来",
                     Toast.LENGTH_LONG).show();
         }
     }
@@ -142,9 +146,9 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onCreateOptionsMenu(android.view.Menu menu) {
-        menu.add(0, 1, 0, "用浏览器登录");
-        menu.add(0, 2, 1, "导入剪贴板");
-        menu.add(0, 4, 2, "用浏览器登录（备用入口）");
+        menu.add(0, 1, 0, "登录（推荐）");
+        menu.add(0, 2, 1, "从剪贴板导入");
+        menu.add(0, 4, 2, "用系统浏览器登录");
         menu.add(0, 3, 3, "刷新");
         return true;
     }
@@ -152,12 +156,31 @@ public class MainActivity extends Activity {
     @Override
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
         switch (item.getItemId()) {
-            case 1: openInBrowser(AppConfig.LOGIN_URL); return true;
-            case 4: openInBrowser(AppConfig.LOGIN_URL_FALLBACK); return true;
+            case 1: openLogin(); return true;
+            case 4: openInBrowser(AppConfig.LOGIN_URL); return true;
             case 2: importFromClipboard(); return true;
             case 3: web.reload(); return true;
             default: return super.onOptionsItemSelected(item);
         }
+    }
+
+    /** 壳内登录：登录页在 WebView 里跑，拿到票就自动回来（不用复制地址）。 */
+    private void openLogin() {
+        startActivityForResult(new Intent(this, LoginActivity.class), REQ_LOGIN);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_LOGIN || resultCode != RESULT_OK || data == null) {
+            return;
+        }
+        String payload = data.getStringExtra("payload");
+        if (payload == null || payload.trim().isEmpty()) {
+            Toast.makeText(this, "没拿到登录信息，再试一次", Toast.LENGTH_LONG).show();
+            return;
+        }
+        inject(payload.trim());
     }
 
     @Override
