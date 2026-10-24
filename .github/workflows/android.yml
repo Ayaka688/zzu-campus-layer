@@ -3,8 +3,13 @@ name: android
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'mobile/**'
+      - 'pwa/**'
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
       - '.github/workflows/android.yml'
 
 permissions:
