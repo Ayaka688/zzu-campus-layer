@@ -98,7 +98,7 @@ export const DEFAULT_PROVIDER = 'school';
 
 /** 按 id 取预设；未知 id 回落到第一个（学校）。 */
 export function resolveProvider(id: string | undefined): LlmProvider {
-  return LLM_PROVIDERS.find((p) => p.id === id) ?? (LLM_PROVIDERS[0] as LlmProvider);
+  return LLM_PROVIDERS.find((p) => p.id === id) ?? (LLM_PROVIDERS.find((p) => p.id === DEFAULT_PROVIDER) ?? LLM_PROVIDERS[0] as LlmProvider);
 }
 
 /** 拼出 /chat/completions 地址（容忍预设里带尾斜杠）。 */
