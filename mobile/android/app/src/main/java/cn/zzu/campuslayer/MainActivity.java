@@ -75,6 +75,18 @@ public class MainActivity extends Activity {
 
     /** 网页 → 壳：一批课前提醒（{at,title,body} 的数组）。JS 接口在各线程回调，切回主线程。 */
     private class NotifyBridge {
+        /** 页面 → 壳：立刻弹一条系统通知（有新通知时用）。 */
+        @JavascriptInterface
+        public void notify(String title, String body) {
+            runOnUiThread(() -> ReminderReceiver.showNow(MainActivity.this, title, body));
+        }
+
+        /** 页面 → 壳：请求通知权限（用户打开开关时才问）。 */
+        @JavascriptInterface
+        public void askNotify() {
+            runOnUiThread(MainActivity.this::askNotificationPermission);
+        }
+
         /** 网页里的「用学校账号登录」按钮 → 壳：走壳内登录页，登录完自动回灌。 */
         @JavascriptInterface
         public void login() {

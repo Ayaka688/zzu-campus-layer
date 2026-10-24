@@ -14,6 +14,30 @@ public class ReminderReceiver extends BroadcastReceiver {
 
     static final String CHANNEL_ID = "class-reminder";
 
+    /** 页面要求「现在就提醒一下」（比如刚拉到新通知）。渠道名与课前提醒共用。 */
+    public static void showNow(Context ctx, String title, String body) {
+        NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel ch = new NotificationChannel(
+                    CHANNEL_ID, "上课提醒", NotificationManager.IMPORTANCE_HIGH);
+            nm.createNotificationChannel(ch);
+        }
+        Notification n = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                ? new Notification.Builder(ctx, CHANNEL_ID)
+                : new Notification.Builder(ctx);
+        n.setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title == null ? "校园信息层" : title)
+                .setContentText(body == null ? "" : body)
+                .setStyle(new Notification.BigTextStyle().bigText(body == null ? "" : body))
+                .setAutoCancel(true);
+        try {
+            nm.notify((int) (System.currentTimeMillis() & 0x7fffffff), n);
+        } catch (SecurityException ignored) {
+            /* 没有通知权限就算了，页面那边也有开关 */
+        }
+    }
+
     @Override
     public void onReceive(Context ctx, Intent intent) {
         String title = intent.getStringExtra("title");

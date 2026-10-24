@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
-import { parseImportLink } from '../src/core/kv';
+import { getKV, parseImportLink } from '../src/core/kv';
 import { probeLlm } from '../src/core/llm';
 import { buildReminderBlocks, pushReminders } from '../src/core/remind';
 import { CampusService } from '../src/core/services';
@@ -30,7 +30,7 @@ import {
 } from '../src/core/noticeStore';
 import { getNoticeBody, runTool } from '../src/core/tools';
 import { todayShanghai } from '../src/core/util';
-import { NoticeBoard, NoticeTodayCard } from '../src/ui/notice';
+import { NoticeBoard } from '../src/ui/notice';
 import './style.css';
 
 interface Message {
@@ -51,6 +51,10 @@ const CAS_LOGIN =
   // 故意指到门户的一个静态样式文件：CAS 只按 host 白名单放行，
   // 而静态文件不会启动那个 uni-app SPA —— SPA 一启动就会把 ?ticket= 从地址栏抹掉。
   encodeURIComponent('https://uniapp.s.zzu.edu.cn/static/index.a5c69d49.css');
+/* 门户的登录入口：同一个 CAS，只是 service 换成门户首页；拿到的票在门户/教务两边都能用。 */
+const CAS_LOGIN_PORTAL =
+  'https://cas.s.zzu.edu.cn/cas/login?service=' +
+  encodeURIComponent('https://uniapp.s.zzu.edu.cn/pages/tab/index/index');
 
 const QUICK: Array<{ label: string; text: string }> = [
   { label: '明天有课吗', text: '明天有课吗' },
@@ -86,6 +90,8 @@ function App() {
   );
   const [noticeCards, setNoticeCards] = useState<NoticeCard[]>([]);
   const [noticeDigest, setNoticeDigest] = useState<TodayDigest | null>(null);
+  /* 系统通知总开关：默认关闭；开启了才排课前提醒、才在出现新通知时打扰用户。 */
+  const [notifyOn, setNotifyOn] = useState(false);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
   const [noticePrefs, setNoticePrefsState] = useState<NoticePrefs>(DEFAULT_NOTICE_PREFS);
@@ -97,6 +103,8 @@ function App() {
     setStatuses(await tokenStatuses());
     setLlm(await getLlmSettings());
     setNoticePrefsState(await getNoticePrefs());
+      const on = await getKV().get<boolean>('notifyOn');
+      setNotifyOn(on === true);
   }
 
   /** 手机端直接跑工具（没有 background），卡片管线与桌面完全同一条。 */
@@ -114,6 +122,7 @@ function App() {
       const payload = out.data as { cards?: NoticeCard[]; digest?: TodayDigest } | undefined;
       setNoticeCards(payload?.cards ?? []);
       setNoticeDigest(payload?.digest ?? null);
+    if (payload?.digest) void notifyFresh(payload.digest);
     } catch (e) {
       setNoticeError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -169,6 +178,7 @@ function App() {
 
   /** 算未来 7 天的课前提醒并交给壳（没有壳时 pushReminders 返回 false，什么也不做）。 */
   async function syncReminders() {
+    if (!notifyOn) return;
     try {
       const session = await loadSession();
       if (!session.jwxtToken && !session.portalToken) return;
@@ -235,7 +245,7 @@ function App() {
     w.__campusImport = async (raw: string): Promise<string> => {
       try {
         const bundle = parseImportLink(String(raw ?? ''));
-        const next = await importTokenBundle(bundle);
+        const next = await importTokenBundle(needPortal(bundle));
         setStatuses(next);
         setLlm(await getLlmSettings());
         setSheet('none');
@@ -330,6 +340,44 @@ function App() {
       }
     })();
   }, []);
+
+  async function toggleNotify(next: boolean) {
+    setNotifyOn(next);
+    await getKV().set('notifyOn', next);
+    const bridge = (window as unknown as { CampusNotify?: { askNotify?: () => void } }).CampusNotify;
+    if (next) {
+      if (bridge?.askNotify) bridge.askNotify();
+      else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        try { await Notification.requestPermission(); } catch { /* 忽略 */ }
+      }
+      void syncReminders();
+    }
+    setNote(next ? '已开启系统通知' : '已关闭系统通知');
+    setTimeout(() => setNote(''), 2500);
+  }
+
+  /** 有新通知时弹一条系统通知；同一天只弹一次，且必须用户自己开了开关。 */
+  async function notifyFresh(d: TodayDigest) {
+    if (!notifyOn) return;
+    const day = todayShanghai();
+    if ((await getKV().get<string>('notifyDay')) === day) return;
+    await getKV().set('notifyDay', day);
+    const title = '今天有 ' + d.fresh.length + ' 条新通知';
+    const body = d.fresh.slice(0, 3).map((c) => c.title).join('\n');
+    const bridge = (window as unknown as { CampusNotify?: { notify?: (t: string, b: string) => void } }).CampusNotify;
+    if (bridge?.notify) {
+      bridge.notify(title, body);
+      return;
+    }
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try { new Notification(title, { body }); } catch { /* 忽略 */ }
+    }
+  }
+
+  /** 一次导入补全两边的票：CAS 票在门户/教务通用，省得用户再登一次门户。 */
+  function needPortal<T extends { jwxt?: string; portal?: string }>(bundle: T): T {
+    return bundle.jwxt && !bundle.portal ? { ...bundle, portal: bundle.jwxt } : bundle;
+  }
 
   /** 壳内登录：调原生桥唤起壳里的登录页（登录完由壳把地址回灌给页面）。 */
   async function shellLogin() {
@@ -432,6 +480,11 @@ function App() {
                   复制登录页链接
                 </button>
               </p>
+              <p class="row">
+                <a class="ghost" href={CAS_LOGIN_PORTAL} target="_blank" rel="noreferrer">
+                  登录门户（拿门户票）
+                </a>
+              </p>
               <p class="hint">
                 登录成功后会跳到<strong>一屏代码文本</strong>，这时<strong>长按地址栏 → 复制整条网址 → 回来粘到下面</strong>。
                 <br />跳到 404 或空白页也照样复制地址栏里的网址。
@@ -518,9 +571,6 @@ function App() {
         </main>
       ) : (
         <main>
-          {noticeDigest && (
-            <NoticeTodayCard digest={noticeDigest} loading={noticeBusy} onOpen={() => setView('notices')} />
-          )}
         {messages.length === 0 && (
           <div class="empty">
             <p>{ready ? '问点实际的：' : '先在右上角导入一次登录态，然后：'}</p>
