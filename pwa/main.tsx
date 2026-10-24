@@ -93,7 +93,7 @@ function App() {
   /* 两类通知分开控制：课前提醒默认开（学生本来就想被提醒），资讯通知默认关（不打扰）。 */
   const [notifyClass, setNotifyClass] = useState(true);
   /* 配色：cream=米白（默认）/ ink=黑+藏青 */
-  const [theme, setTheme] = useState<'cream' | 'ink'>('cream');
+  const [theme, setTheme] = useState<'cream' | 'ink'>('ink');
   const [notifyNews, setNotifyNews] = useState(false);
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeError, setNoticeError] = useState('');
@@ -107,7 +107,7 @@ function App() {
     setLlm(await getLlmSettings());
     setNoticePrefsState(await getNoticePrefs());
       const themePref = await getKV().get<string>('theme');
-      const t = themePref === 'ink' ? 'ink' : 'cream';
+      const t = themePref === 'cream' ? 'cream' : 'ink';
       setTheme(t);
       document.documentElement.dataset.theme = t;
       const classPref = await getKV().get<boolean>('notifyClass');
