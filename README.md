@@ -35,7 +35,7 @@
 | --- | --- | --- | --- |
 | **浏览器扩展**（MV3） | 电脑上用（可选） | 全部 14 个工具 + 通知卡片 + 每日盯梢 | 见 [60 秒上手](#60-秒上手扩展)（没装 Node 就下 [dist.zip](https://github.com/rebeca-aa/zzu-campus-layer/releases/download/dist-latest/campus-layer-dist.zip)） |
 | **PWA** | 手机（安卓/iOS 都能加主屏幕） | 除"每日盯梢"外的全部；可带模型 key | 打开 [在线演示](https://rebeca-aa.github.io/zzu-campus-layer/) → 加主屏幕 |
-| **安卓壳**（可选） | 想要原生图标 + **课前 30 分钟通知** | PWA 全部 + AlarmManager 提醒 | 从 Actions 下 `campus-layer-debug-apk` |
+| **安卓壳**（可选） | 想要原生图标 + **课前 30 分钟通知** | PWA 全部 + AlarmManager 提醒（壳内嵌登录，不用再复制地址） | [**直接下载 APK**](https://github.com/rebeca-aa/zzu-campus-layer/releases/download/apk-latest/campus-layer-debug.apk)（不用登录 GitHub） |
 
 > 手机 Chrome 至今不支持扩展（Kiwi 已停更），所以手机走 PWA；安卓壳只是把同一个 PWA 包进 WebView，顺便拿到系统通知能力。
 >
@@ -157,6 +157,16 @@ npm run build                  # 产物在 dist/（这个目录不进仓库，�
 | 手机取登录态 | ✅ 已解决 | CAS 登录 → 地址栏带 ticket → 粘贴即导入（见下节） |
 
 明确做不到的（不是没做，是数据/权限不在手上）：一卡通消费分类（接口只给深链）、通知全文（门户 CMS 硬截 200 字）、座位图下单（必须本人学号+密码，且要过 AES 加密）。
+
+## 装安卓壳（可选）
+
+1. 手机点这个链接下载（**不需要登录 GitHub**）：
+   <https://github.com/rebeca-aa/zzu-campus-layer/releases/download/apk-latest/campus-layer-debug.apk>
+2. 打开安装包 → 系统会拦一下「未知来源应用」，允许你的浏览器/文件管理器装即可。
+3. 首次打开点右上角菜单 **「登录（推荐）」**——壳里会用学校账号登录，登录完自动回到主界面并把登录态灌进去，**不用再复制地址、不用同步码**。
+4. 装完能在系统里收到课前 30 分钟提醒（连着上的两节课合成一条）。
+
+> 这个 APK 是 CI 每次 push 到 main 自动构建的调试包（没有正式签名），想自己构建见 [`mobile/android`](mobile/android)。壳内登录若哪天失灵，还有两条备选：菜单「从剪贴板导入」（在外面复制带 `ticket=` 的地址）与「用系统浏览器登录」。
 
 ## 登录态从哪来
 
