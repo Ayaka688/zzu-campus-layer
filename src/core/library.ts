@@ -290,10 +290,25 @@ export interface LibSeatMap {
   total?: number;
   free?: number;
   seats: LibSeat[];
+  /**
+   * 楼层里的房间（自习室 / 阅览区）。
+   * 一楼是一整个大厅，只有一间；二三四楼有很多间，每间有自己的座位图和坐标，
+   * 混在一张图上会互相压着，所以按房间分开画。
+   */
+  rooms?: LibRoom[];
   /** 实际使用的日期（服务端只认今天/明天，会被夹紧） */
   date?: string;
   /** 实际使用的区域 id */
   areaId?: string;
+}
+
+export interface LibRoom {
+  name: string;
+  seats: LibSeat[];
+  total?: number;
+  free?: number;
+  /** 房间 id（接口给了就带上，下单时可能有用） */
+  id?: string;
 }
 
 /**
@@ -349,26 +364,90 @@ const STATUS_NUM: Record<string, { label: string; free: boolean }> = {
   '4': { label: '临时离开', free: false },
 };
 
+const ROOM_NAME_FIELDS = ['room_name', 'roomName', 'area_name', 'areaName', 'label_name', 'labelName', 'space_name', 'spaceName', 'name', 'title'];
+
+/** 房间名：只认长度合理的字符串，避免把座位号/状态当成房间名 */
+function roomNameOf(obj: Record<string, unknown>): string {
+  for (const k of ROOM_NAME_FIELDS) {
+    const v = obj[k];
+    if (typeof v === 'string') {
+      const st = v.trim();
+      if (st && st.length <= 24 && !/^\d+$/.test(st)) return st;
+    }
+  }
+  return '';
+}
+
 /**
  * 宽容解析：不假设字段名。
  * 服务端的座位列表字段名改过（`seat_list`/`list`/`seats`/数组本身），
- * 所以这里递归找「看起来像座位」的对象数组，认不出来就返回空。
+ * 所以这里递归找「看起来像座位」的对象，认不出来就返回空。
+ *
+ * 同时**按房间分组**：二三四楼一层里有多个自习室，每个房间有自己的坐标系，
+ * 全部平铺到一张图上会互相压住，所以这里记住每个座位属于哪个房间。
  */
 export function parseSeatMap(raw: unknown): LibSeatMap {
   const out: LibSeatMap = { seats: [] };
-  const seen = new Set<string>();
+  const rooms = new Map<number, LibRoom>();
+  const seenInRoom = new Map<number, Set<string>>();
+  const ROOT_ROOM = 0;
+  let roomSeq = 0;
 
-  const visit = (node: unknown, depth: number): void => {
-    if (!node || depth > 4) return;
+  /* 每个「盛座位的那一层对象」算一间房：名字有就用，没有就叫「房间 N」 */
+  const roomOfObject = new WeakMap<object, number>();
+  const roomFor = (obj: object): number => {
+    let id = roomOfObject.get(obj);
+    if (id === undefined) {
+      id = ++roomSeq;
+      roomOfObject.set(obj, id);
+      rooms.set(id, { name: roomNameOf(obj as Record<string, unknown>), seats: [] });
+    }
+    return id;
+  };
+
+  const looksLikeSeatObj = (o: Record<string, unknown>): boolean => {
+    const no = seatNo(o);
+    const status = seatStatus(o);
+    return Boolean(no) && (status !== '' || 'x' in o || 'y' in o || 'left' in o || 'top' in o || 'point_x' in o);
+  };
+
+  /** 这一层对象下面是否直接挂着一串座位（是的话它就是「房间」） */
+  const isRoomContainer = (obj: Record<string, unknown>): boolean => {
+    for (const v of Object.values(obj)) {
+      if (Array.isArray(v)) {
+        const seats = v.filter((x) => x && typeof x === 'object' && looksLikeSeatObj(x as Record<string, unknown>));
+        if (seats.length >= 2) return true;
+      }
+    }
+    return false;
+  };
+
+  const add = (roomId: number, seat: LibSeat): void => {
+    const seen = seenInRoom.get(roomId) ?? new Set<string>();
+    if (seen.has(seat.no)) return;
+    seen.add(seat.no);
+    seenInRoom.set(roomId, seen);
+    const room = rooms.get(roomId) ?? { name: '', seats: [] };
+    if (!rooms.has(roomId)) rooms.set(roomId, room);
+    room.seats.push(seat);
+    out.seats.push(seat);
+  };
+
+  const visit = (node: unknown, depth: number, roomId: number): void => {
+    if (!node || depth > 6) return;
     if (Array.isArray(node)) {
-      for (const item of node) visit(item, depth + 1);
+      for (const item of node) visit(item, depth + 1, roomId);
       return;
     }
     if (typeof node !== 'object') return;
     const obj = node as Record<string, unknown>;
 
     if (typeof obj.area_name === 'string' && obj.area_name && !out.areaName) out.areaName = obj.area_name;
-    if (typeof obj.name === 'string' && obj.name && !out.areaName) out.areaName = obj.name;
+    /* 有些返回把整区名放在 `name` 里（例如 data.name = "一楼大厅"）：只在还没见到座位时用，免得把房间名当区名 */
+    if (!out.areaName && !out.seats.length && !looksLikeSeatObj(obj)) {
+      const nm = roomNameOf(obj);
+      if (nm) out.areaName = nm;
+    }
     const t = Number(obj.total_num ?? obj.total);
     if (Number.isFinite(t) && t > 0 && out.total === undefined) out.total = t;
     const f = Number(obj.free_num ?? obj.free);
@@ -376,49 +455,170 @@ export function parseSeatMap(raw: unknown): LibSeatMap {
 
     const no = seatNo(obj);
     const status = seatStatus(obj);
-    // 座位对象的最低特征：有座位号，且有状态/坐标之一
-    const looksLikeSeat =
-      Boolean(no) &&
-      (status !== '' || 'x' in obj || 'y' in obj || 'left' in obj || 'top' in obj);
-    if (looksLikeSeat && !seen.has(no)) {
-      seen.add(no);
+    if (looksLikeSeatObj(obj)) {
       const byName = status !== '' && FREE_RE.test(status) && !USED_RE.test(status);
       const byNum = STATUS_NUM[status]?.free ?? false;
       const free = status !== '' ? byName || byNum : false;
       const x = numOr(obj.point_x ?? obj.x ?? obj.left);
       const y = numOr(obj.point_y ?? obj.y ?? obj.top);
-      out.seats.push({ no, status, free, ...(x !== undefined ? { x } : {}), ...(y !== undefined ? { y } : {}) });
+      const seat: LibSeat = { no, status, free, ...(x !== undefined ? { x } : {}), ...(y !== undefined ? { y } : {}) };
+      /* 座位自己带房间名（且不是整区名）就单开一间，不然跟随所在容器 */
+      const own = roomNameOf(obj);
+      add(own && own !== out.areaName ? roomFor(obj) : roomId, seat);
       return;
     }
 
-    for (const v of Object.values(obj)) if (v && typeof v === 'object') visit(v, depth + 1);
+    const nextRoom = isRoomContainer(obj) ? roomFor(obj) : roomId;
+    for (const v of Object.values(obj)) if (v && typeof v === 'object') visit(v, depth + 1, nextRoom);
   };
 
-  visit(raw, 0);
+  visit(raw, 0, ROOT_ROOM);
+  if (!rooms.has(ROOT_ROOM)) rooms.set(ROOT_ROOM, { name: '', seats: [] });
+
   out.seats.sort((a, b) => a.no.localeCompare(b.no, 'zh'));
+  const list = [...rooms.values()].filter((r) => r.seats.length > 0);
+  for (const r of list) {
+    r.total = r.seats.length;
+    r.free = r.seats.filter((s) => s.free).length;
+  }
+  const named = list.filter((r) => r.name);
+  /* 一楼的整层就是一间大厅：只有真的分出多间（或唯一那间有自己的名字）才分层显示 */
+  if (list.length > 1 || (named.length === 1 && list.length === 1 && named[0]!.name !== out.areaName)) {
+    out.rooms = list;
+  }
   if (out.free === undefined && out.seats.length) out.free = out.seats.filter((s) => s.free).length;
   return out;
 }
 
+/** 按房间名筛（只问某一间时用），匹配不到返回 undefined */
+export function pickRoom<T extends LibSeatMap>(m: T, want: string): T | undefined {
+  const rooms = m.rooms ?? [];
+  if (!rooms.length) return undefined;
+  const q = want.replace(/\s+/g, '').toLowerCase();
+  if (!q) return undefined;
+  const hit =
+    rooms.find((r) => r.name.replace(/\s+/g, '').toLowerCase() === q) ??
+    rooms.find((r) => {
+      const n = r.name.replace(/\s+/g, '').toLowerCase();
+      return n.includes(q) || q.includes(n);
+    });
+  if (!hit) return undefined;
+  return { ...m, rooms: [hit], seats: hit.seats, free: hit.free, total: hit.total };
+}
+
+/** 图的配色：跟深色界面同一套，免得在聊天里突然出现一块荧光绿 */
+const MAP_BG = '#0b0f14';
+const PLATE_BG = '#10151c';
+const PLATE_LINE = '#1b222c';
+const MAP_INK = '#e6edf3';
+const MAP_MUTED = '#8b949e';
+const MAP_FREE = '#3ddc84';
+const MAP_TAKEN = '#3c4654';
+
+/** 画布左右留白（房间底板离画布边缘的距离） */
+const PLATE_X = 10;
+/** 房间底板内边距 */
+const PLATE_PAD = 12;
+/** 房间标题行高度 */
+const ROOM_HEAD = 28;
+/** 顶部整图标题行高度 */
+const HEAD_H = 40;
+/** 底部图例行高度 */
+const FOOT_H = 30;
+
 /**
  * 把座位坐标画成 SVG 平面图（真实接口给 point_x/point_y）。
- * 只给**空闲**座位标号；标号会做碰撞检测，挤不下的就不标（悬停仍能看座位号）。
+ * 一层里有多间房时**每间单独一块**（坐标是各房间自己的，混着画会叠成一团）。
+ * 只给**空闲**座位标号；标号会做碰撞检测，挤不下的就不标。
  * 拿不到坐标就不画——宁可说「看不到图」，也不画一张假图。
  */
 export function seatMapSvg(m: LibSeatMap, opts: { width?: number; labels?: boolean } = {}): string | undefined {
-  const pts = m.seats.filter((s) => typeof s.x === 'number' && typeof s.y === 'number');
-  if (pts.length < 4) return undefined;
-
+  const W = opts.width ?? 720;
   const wantLabels = opts.labels !== false;
+  const multi = (m.rooms?.length ?? 0) > 1;
+  const groups = multi ? m.rooms! : [{ name: '', seats: m.seats }];
+  /* 单层给足纵向空间；多间时每间压扁一点，整张图不至于长得离谱 */
+  const maxSeatH = multi ? 360 : 500;
+  const plateW = W - PLATE_X * 2;
+  const seatW = plateW - PLATE_PAD * 2;
 
-  /* 先按 720 试；标号放得下不到六成就换 1080 再试一次 */
-  const tryWidth = (W: number) => layoutSeatMap(pts, W, wantLabels);
-  let drawn = tryWidth(opts.width ?? 720);
-  if (wantLabels && drawn.labeled < drawn.freeCount * 0.6 && (opts.width ?? 720) < 1080) {
-    const wider = tryWidth(1080);
-    if (wider.labeled > drawn.labeled) drawn = wider;
+  const panels: { title: string; free: number; total: number; labeled: number; inner: string; height: number }[] = [];
+  for (const g of groups) {
+    const pts = g.seats.filter((s) => typeof s.x === 'number' && typeof s.y === 'number') as SeatPoint[];
+    if (pts.length < 4) continue;
+    const drawn = layoutSeatMap(pts, seatW, wantLabels, maxSeatH);
+    panels.push({
+      title: multi ? g.name || `房间 ${panels.length + 1}` : '',
+      free: pts.filter((s) => s.free).length,
+      total: pts.length,
+      labeled: drawn.labeled,
+      inner: drawn.inner,
+      height: drawn.height,
+    });
   }
-  return drawn.svg;
+  if (!panels.length) return undefined;
+
+  const freeAll = m.seats.filter((s) => s.free).length;
+  const labeledAll = panels.reduce((n, p) => n + p.labeled, 0);
+  const head = multi ? `${m.areaName || '这一层'} · ${panels.length} 间` : m.areaName || '图书馆座位图';
+  const right = [
+    m.date,
+    `空 ${freeAll} / 共 ${m.seats.length}`,
+    wantLabels && labeledAll < freeAll ? `标号 ${labeledAll}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const parts: string[] = [];
+  parts.push(
+    `<text x="${PLATE_X + 6}" y="26" fill="${MAP_INK}" font-size="15" font-weight="700" font-family="system-ui,sans-serif">${esc(head)}</text>`,
+    `<text x="${W - PLATE_X - 6}" y="26" text-anchor="end" fill="${MAP_MUTED}" font-size="12" font-family="system-ui,sans-serif">${esc(right)}</text>`,
+  );
+
+  let y = HEAD_H;
+  for (const p of panels) {
+    const h = ROOM_HEAD + p.height;
+    parts.push(`<g transform="translate(0,${y})">`);
+    parts.push(
+      `<rect x="${PLATE_X}" y="0" width="${plateW}" height="${h}" rx="16" fill="${PLATE_BG}" stroke="${PLATE_LINE}"/>`,
+    );
+    if (p.title) {
+      parts.push(
+        `<text x="${PLATE_X + PLATE_PAD + 2}" y="${ROOM_HEAD - 9}" fill="${MAP_INK}" font-size="13" font-weight="600" font-family="system-ui,sans-serif">${esc(p.title)}</text>`,
+      );
+      parts.push(
+        `<text x="${W - PLATE_X - PLATE_PAD - 2}" y="${ROOM_HEAD - 9}" text-anchor="end" fill="${MAP_MUTED}" font-size="11.5" font-family="system-ui,sans-serif">空 ${p.free} / 共 ${p.total}${
+          wantLabels && p.labeled < p.free ? ` · 标号 ${p.labeled}` : ''
+        }</text>`,
+      );
+    }
+    parts.push(`<g transform="translate(${PLATE_X + PLATE_PAD},${ROOM_HEAD})">${p.inner}</g>`);
+    parts.push('</g>');
+    y += h + 14;
+  }
+
+  const H = y - 14 + FOOT_H;
+  parts.push(
+    `<g transform="translate(${PLATE_X + 8},${H - 19})">`,
+    `<circle cx="0" cy="0" r="4.2" fill="${MAP_FREE}"/>`,
+    `<text x="9" y="4" fill="${MAP_MUTED}" font-size="11.5" font-family="system-ui,sans-serif">空闲</text>`,
+    `<circle cx="62" cy="0" r="4.2" fill="${MAP_TAKEN}"/>`,
+    `<text x="71" y="4" fill="${MAP_MUTED}" font-size="11.5" font-family="system-ui,sans-serif">已占</text>`,
+    `<text x="${W - PLATE_X * 2 - 8}" y="4" text-anchor="end" fill="#5d6673" font-size="11" font-family="system-ui,sans-serif">圈里的数字是空位号，订座时说它就成</text>`,
+    `</g>`,
+  );
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="system-ui,sans-serif">`,
+    `<rect width="100%" height="100%" rx="18" fill="${MAP_BG}"/>`,
+    parts.join(''),
+    '</svg>',
+  ].join('');
+}
+
+/** SVG 文本转义（房间名里有 & < > 时不至于把图弄坏） */
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 interface SeatPoint {
@@ -429,23 +629,35 @@ interface SeatPoint {
   status: string;
 }
 
-function layoutSeatMap(pts: SeatPoint[], W: number, wantLabels: boolean): { svg: string; labeled: number; freeCount: number } {
-  const PAD = 16;
+function layoutSeatMap(
+  pts: SeatPoint[],
+  W: number,
+  wantLabels: boolean,
+  maxH = 600,
+): { inner: string; width: number; height: number; labeled: number; freeCount: number } {
+  const PAD = 10;
   const xs = pts.map((s) => s.x as number);
   const ys = pts.map((s) => s.y as number);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
+  /* 两个方向都留 1px，免得所有座位在同一水平/垂直线上时除零 */
   const spanX = Math.max(maxX - minX, 1);
   const spanY = Math.max(maxY - minY, 1);
-  const scale = (W - PAD * 2) / spanX;
-  const H = Math.min(Math.round(spanY * scale + PAD * 2), 560);
-  const r = Math.max(2.5, Math.min(7, scale * 0.9));
+  /* 宽高都要装得下：取较小的那个比例，绝不把底部一排裁掉 */
+  const scale = Math.min((W - PAD * 2) / spanX, (maxH - PAD * 2) / spanY);
+  const usedW = spanX * scale;
+  const usedH = spanY * scale;
+  /* 房间里座位少的时候居中摆，不要都挤在左上角 */
+  const ox = PAD + Math.max(0, (W - PAD * 2 - usedW) / 2);
+  const oy = PAD + Math.max(0, (maxH - PAD * 2 - usedH) / 2);
+  const H = Math.max(60, Math.round(usedH + PAD * 2));
+  const r = Math.max(3.2, Math.min(8, scale * 0.62));
 
   const at = (s: SeatPoint) => ({
-    cx: PAD + ((s.x as number) - minX) * scale,
-    cy: PAD + ((s.y as number) - minY) * scale,
+    cx: ox + ((s.x as number) - minX) * scale,
+    cy: oy + ((s.y as number) - minY) * scale,
   });
 
   /* 已落位的标号盒子，用来做碰撞检测（数字估宽足够准） */
@@ -454,48 +666,53 @@ function layoutSeatMap(pts: SeatPoint[], W: number, wantLabels: boolean): { svg:
     boxes.some((o) => !(b.x2 < o.x1 || b.x1 > o.x2 || b.y2 < o.y1 || b.y1 > o.y2));
 
   const free = pts.filter((s) => s.free);
-  const fs = Math.max(6, Math.min(10, Math.round(scale * 1.15)));
+  const fs = Math.max(8.5, Math.min(11.5, Math.round(scale * 0.95 * 10) / 10));
   const labels: string[] = [];
   let labeled = 0;
 
-  /* 每个标号试 8 个方位，优先选「不压任何座位点」的位置，全都不行才退回压得最少的 */
+  /* 每个标号先试近处 8 个方位，再试远一圈；**只要会压到任何座位点就不标**，宁缺不糊 */
   const centers = pts.map((q) => at(q));
 
   if (wantLabels && free.length) {
     for (const seat of free.slice().sort((a, b) => a.no.localeCompare(b.no, 'zh'))) {
       const { cx, cy } = at(seat);
-      const w = seat.no.length * fs * 0.62;
+      const w = seat.no.length * fs * 0.6;
       const h = fs;
-      const gap = r + 1.5;
 
-      const candidates = [
-        { x: cx + gap, y: cy + fs * 0.28 },
-        { x: cx - gap - w, y: cy + fs * 0.28 },
-        { x: cx - w / 2, y: cy - gap - h * 0.15 },
-        { x: cx - w / 2, y: cy + gap + h * 0.85 },
-        { x: cx + gap * 0.7, y: cy - gap * 0.7 - h * 0.1 },
-        { x: cx - gap * 0.7 - w, y: cy - gap * 0.7 - h * 0.1 },
-        { x: cx + gap * 0.7, y: cy + gap * 0.7 + h * 0.8 },
-        { x: cx - gap * 0.7 - w, y: cy + gap * 0.7 + h * 0.8 },
-      ];
-
-      let best: { box: { x1: number; y1: number; x2: number; y2: number }; covered: number } | undefined;
-      for (const c of candidates) {
-        const box = { x1: c.x, y1: c.y - h * 0.72, x2: c.x + w, y2: c.y + h * 0.28 };
-        if (box.x1 < 1 || box.x2 > W - 2 || box.y1 < 1) continue;
-        if (hit(box)) continue;
-        const covered = centers.filter(
-          (q) => q.cx + r > box.x1 && q.cx - r < box.x2 && q.cy + r > box.y1 && q.cy - r < box.y2,
-        ).length;
-        if (!best || covered < best.covered) best = { box, covered };
-        if (covered === 0) break;
+      const ring: number[] = [r + 1.6, r + 5, r + 9];
+      const candidates: { x: number; y: number }[] = [];
+      for (const gap of ring) {
+        candidates.push(
+          { x: cx + gap, y: cy + fs * 0.3 },
+          { x: cx - gap - w, y: cy + fs * 0.3 },
+          { x: cx - w / 2, y: cy + gap + h * 0.85 },
+          { x: cx - w / 2, y: cy - gap - h * 0.12 },
+          { x: cx + gap * 0.72, y: cy - gap * 0.72 },
+          { x: cx - gap * 0.72 - w, y: cy - gap * 0.72 },
+          { x: cx + gap * 0.72, y: cy + gap * 0.72 + h * 0.7 },
+          { x: cx - gap * 0.72 - w, y: cy + gap * 0.72 + h * 0.7 },
+        );
       }
-      if (!best) continue;
 
-      boxes.push(best.box);
+      let box: { x1: number; y1: number; x2: number; y2: number } | undefined;
+      for (const c of candidates) {
+        const b = { x1: c.x, y1: c.y - h * 0.7, x2: c.x + w, y2: c.y + h * 0.3 };
+        if (b.x1 < 2 || b.x2 > W - 2 || b.y1 < 1 || b.y2 > H - 1) continue;
+        if (hit(b)) continue;
+        const covers = centers.some(
+          (q) => q.cx + r > b.x1 && q.cx - r < b.x2 && q.cy + r > b.y1 && q.cy - r < b.y2,
+        );
+        if (covers) continue;
+        box = b;
+        break;
+      }
+      if (!box) continue;
+
+      boxes.push(box);
       labels.push(
-        '<text x="' + best.box.x1.toFixed(1) + '" y="' + (best.box.y2 - 1).toFixed(1) +
-          '" fill="#7ee787" font-size="' + fs + '" font-family="ui-monospace,monospace" stroke="#0f1115" stroke-width="2.5" paint-order="stroke" stroke-linejoin="round">' + seat.no + '</text>',
+        '<text x="' + box.x1.toFixed(1) + '" y="' + (box.y2 - 1).toFixed(1) +
+          '" fill="#dcffea" font-size="' + fs + '" font-family="ui-monospace,monospace" letter-spacing="0.2"' +
+          ' stroke="#06170d" stroke-width="2.6" paint-order="stroke" stroke-linejoin="round">' + seat.no + '</text>',
       );
       labeled++;
     }
@@ -504,34 +721,24 @@ function layoutSeatMap(pts: SeatPoint[], W: number, wantLabels: boolean): { svg:
   const dots = pts
     .map((s) => {
       const { cx, cy } = at(s);
-      const fill = s.free ? '#3fb950' : '#3a3f47';
+      /* 空位：亮绿点 + 一圈淡淡的光晕；已占：压暗的灰点，不抢视线 */
+      const core = s.free
+        ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${MAP_FREE}" data-seat="${esc(s.no)}"/>` +
+          `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(r * 2.1).toFixed(1)}" fill="${MAP_FREE}" opacity="0.13"/>`
+        : `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(r * 0.92).toFixed(1)}" fill="${MAP_TAKEN}" data-seat="${esc(s.no)}"/>`;
       const tip = s.free ? '空闲' : s.status && !/^\d+$/.test(s.status) ? s.status : '已占';
-      return (
-        '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + fill + '">' +
-        '<title>' + s.no + ' · ' + tip + '</title></circle>'
-      );
+      return `${core}<title>${s.no} · ${tip}</title>`;
     })
     .join('');
 
-  const legend =
-    '空 ' + free.length + ' / 共 ' + pts.length + (wantLabels && labeled < free.length ? '（标号 ' + labeled + ' 个，其余挤不下）' : '');
+  /* 标号压不下时不在这里写字（会撞到最后一排座位），交给房间标题右边那句 */
+  const inner = [dots, labels.join('')].join('');
 
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">',
-    '<rect width="100%" height="100%" fill="#12141a"/>',
-    dots,
-    labels.join(''),
-    '<text x="' + PAD + '" y="' + (H - 6) + '" fill="#8b949e" font-size="11" font-family="system-ui,sans-serif">' +
-      legend.replace(/&/g, '&amp;').replace(/</g, '&lt;') +
-      '</text>',
-    '</svg>',
-  ].join('');
-
-  return { svg, labeled, freeCount: free.length };
+  return { inner, width: W, height: H, labeled, freeCount: free.length };
 }
 
 /** 给 <img src> 用的 data URI（不依赖 btoa 的 latin1 限制） */
-export function seatMapDataUri(m: LibSeatMap, opts: { width?: number } = {}): string | undefined {
+export function seatMapDataUri(m: LibSeatMap, opts: { width?: number; labels?: boolean } = {}): string | undefined {
   const svg = seatMapSvg(m, opts);
   if (!svg) return undefined;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
@@ -540,6 +747,8 @@ export function seatMapDataUri(m: LibSeatMap, opts: { width?: number } = {}): st
 export function renderSeatMap(m: LibSeatMap, opts: { limit?: number } = {}): string {
   const limit = opts.limit ?? 40;
   const rows: string[] = [];
+  const rooms = m.rooms ?? [];
+  const multi = rooms.length > 1;
   const area = m.areaName ? ` · ${m.areaName}` : '';
   const freeSeats = m.seats.filter((s) => s.free);
   const meta = [m.date ? `日期 ${m.date}` : '', m.areaName ? m.areaName : m.areaId ? `区域 ${m.areaId}` : '']
@@ -550,6 +759,20 @@ export function renderSeatMap(m: LibSeatMap, opts: { limit?: number } = {}): str
     rows.push('没解析出座位（可能接口字段变了，或者座位图还没加载完）。');
     return rows.join('\n');
   }
+
+  if (multi) {
+    // 一层多间：先把房间列清楚，每间报一次余量
+    const floor = m.areaName || '这一层';
+    rows.push(`${floor}分了 **${rooms.length}** 间，共 ${m.seats.length} 个座位、空闲 **${freeSeats.length}** 个：`, '');
+    for (const r of rooms) {
+      const free = r.seats.filter((s) => s.free);
+      rows.push(`- **${r.name || '未命名房间'}**：空 ${free.length} / 共 ${r.seats.length}`);
+    }
+    rows.push('', `图里每间房一块，块头写着房间名。只想知道某一间，就说「${floor} <房间名> 座位图」。`);
+    rows.push('', '要订就说座位号（例如「订 001，今天」），确认时会让你长按按钮。');
+    return rows.join('\n');
+  }
+
   rows.push(`共 ${m.seats.length} 个座位，当前空闲 **${freeSeats.length}** 个。`);
   if (freeSeats.length) {
     const show = freeSeats.slice(0, limit).map((s) => s.no);

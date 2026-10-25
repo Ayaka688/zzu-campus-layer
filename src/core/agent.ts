@@ -1,5 +1,5 @@
 import { CampusService, CampusSession } from './services';
-import { helpText, parseIntent, relativeDayOffset } from './intent';
+import { extractRoomName, helpText, parseIntent, relativeDayOffset, relativeWeekOffset, type Intent } from './intent';
 import {
   classifyIntentVerbose,
   llmChatWithTools,
@@ -9,6 +9,7 @@ import {
 } from './llm';
 import { TOOLS, ToolName, runTool } from './tools';
 import { activeToolSpecs } from './toolspec';
+import { resolveUtterance } from './utterance';
 import { addDays, todayShanghai, weekdayOf } from './util';
 
 export interface AskResult {
@@ -93,6 +94,25 @@ export function applyTextHints(name: string, args: Record<string, unknown>, text
   if (name === 'get_schedule') {
     if (off !== undefined) out.day = off === 0 ? 'today' : off === 1 ? 'tomorrow' : weekdayOf(addDays(today, off));
     if (period && !out.period) out.period = period;
+    // 周次也一样：用户说了「下周」就按相对周算；只说了「第 N 周」才用绝对周次。
+    if (!/第\s*\d{1,2}\s*周/.test(text)) {
+      const weekOffset = relativeWeekOffset(text);
+      const dated = off === 0 || off === 1;
+      if (weekOffset !== undefined && weekOffset !== 0) {
+        delete out.week;
+        out.weekOffset = weekOffset;
+      } else if (dated) {
+        // 按天查时周次必须由日期推，模型/正则塞进来的绝对周次一律丢掉
+        delete out.week;
+        delete out.weekOffset;
+      }
+    }
+  }
+  if (name === 'library_seat_map') {
+    // 模型常常漏掉房间名；用户话里带了就补上（只给楼层时不补，那是「列全部房间」）
+    const room = extractRoomName(text);
+    if (room) out.room = room;
+    else delete out.room;
   }
   return out;
 }
@@ -231,6 +251,27 @@ function buildAgentPrompt(today: string): string {
   ].join('\n');
 }
 
+/**
+ * 说法库兜底：把「没被正则接住的一句话」对到语料里最像的那句。
+ *
+ * 只在**没配模型**时走这里，所以接了 key 的人行为一点没变。
+ * 两道保险：分数要过 `EXECUTE_SCORE`；工具自己的 schema 必须认可这组参数——
+ * 认可不了就当没听懂（宁可让用户重说，也不能跑错工具）。
+ */
+export function guessIntentByPhrase(text: string, today: string): Intent | null {
+  const hit = resolveUtterance(text);
+  if (!hit) return null;
+  const def = TOOLS[hit.tool];
+  const hinted = applyTextHints(hit.tool, hit.args ?? {}, text, today);
+  const parsed = def.schema.safeParse(hinted);
+  if (!parsed.success) return null;
+  return {
+    tool: hit.tool,
+    args: parsed.data as Record<string, unknown>,
+    reason: `说法库 ${hit.score.toFixed(2)}：「${hit.matched}」`,
+  };
+}
+
 /** 老路径：规则优先，模型只判一个工具（给不支持 function calling 的模型用）。 */
 async function runClassic(
   text: string,
@@ -238,14 +279,18 @@ async function runClassic(
   opts: AskOptions,
 ): Promise<AskResult> {
   const today = session.today ?? todayShanghai();
+  const llm = opts.llm;
+  const llmReady = Boolean(llm?.enabled && llm.apiKey);
   let intent = parseIntent(text, today);
+  // 正则没接住、又没配模型 —— 用离线说法库再试一次（配了模型的人不会走到这里）
+  if (!intent && !llmReady) intent = guessIntentByPhrase(text, today);
   let via: AskResult['via'] = intent ? 'rule' : 'none';
   let llmError: string | undefined;
   let llmMs: number | undefined;
   let llmReply: string | undefined;
 
-  if (!intent && opts.llm?.enabled && opts.llm.apiKey) {
-    const attempt = await classifyIntentVerbose(text, today, opts.llm);
+  if (!intent && llmReady && llm) {
+    const attempt = await classifyIntentVerbose(text, today, llm);
     llmMs = attempt.ms;
     if (attempt.intent) {
       intent = attempt.intent;

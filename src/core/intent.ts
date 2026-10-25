@@ -64,6 +64,8 @@ export function extractPeriod(text: string): Period | undefined {
 export function relativeDayOffset(text: string): number | undefined {
   if (/大后天/.test(text)) return 3;
   if (/后天/.test(text)) return 2;
+  if (/明早|明儿早|明晚|明儿晚/.test(text)) return 1;
+  if (/今早|今儿早|今晚|今儿晚/.test(text)) return 0;
   if (/明天|明日/.test(text)) return 1;
   if (/今天|今日|now/.test(text)) return 0;
   return undefined;
@@ -92,6 +94,18 @@ function extractWeek(text: string): number | undefined {
 }
 
 /**
+ * 「下周 / 上周」这种相对周次：返回相对当前周 +1 / -1，交给工具去算具体周号。
+ * 让模型或正则自己数周号是错的根源——日期跨周时（周日晚问「明天」）必然算错。
+ */
+export function relativeWeekOffset(text: string): number | undefined {
+  if (/下下(个)?(周|星期|礼拜)/.test(text)) return 2;
+  if (/下(个)?(周|星期|礼拜)/.test(text)) return 1;
+  if (/上(个)?(周|星期|礼拜)/.test(text)) return -1;
+  if (/(这|本|当前)(个)?(周|星期|礼拜)/.test(text)) return 0;
+  return undefined;
+}
+
+/**
  * 图书馆区域 id：站点里 `1`=主校区、`10`=东、`60`=南、`70`=北，
  * 楼层是独立的 id（一楼 `2`/`71`/`61`，二楼 `72`/`4`/`24`…）。
  * 这里只做最常见的「主校区 + 一楼/二楼」映射；其它说法交给模型或让用户补一句。
@@ -107,6 +121,22 @@ const LIB_AREAS: Array<{ re: RegExp; id: string; name: string }> = [
 function extractLibraryArea(text: string): { id: string; name: string } | undefined {
   for (const a of LIB_AREAS) if (a.re.test(text)) return { id: a.id, name: a.name };
   return undefined;
+}
+
+/**
+ * 房间名：二层以上一层里有好几间自习室，用户会说「二楼 A 区座位图」。
+ * 只认带房间尾巴的说法（区/室/间/厅/自习室…），别把「图书馆二楼」当成房间。
+ */
+export function extractRoomName(text: string): string | undefined {
+  const cleaned = text
+    .replace(/座位图|平面图|地图|空位图|座位|位置|空位|空座|还有|哪些|哪个|哪间|有没有|空着|多少|吗|呢|的|啊/g, ' ')
+    .replace(/(一楼|1楼|一层|大厅|二楼|2楼|二层|三楼|3楼|三层|四楼|4楼|四层|图书馆)/g, ' ')
+    .replace(/[，,。.、!！?？]/g, ' ');
+  const m = /([A-Za-z]{0,2}\s*区|[\u4e00-\u9fa5A-Za-z0-9]{2,10}(?:自习室|阅览室|研习间|研讨室|讨论室|室|间|厅))/.exec(cleaned);
+  const name = m?.[1]?.replace(/\s+/g, ' ').trim();
+  if (!name) return undefined;
+  if (/^(房间|座位|楼层|这间|那间)$/.test(name)) return undefined;
+  return name;
 }
 
 /** 座位号：`001`、`A12`、`A-12` 这类；避免把「明天」里的数字当座位号 */
@@ -172,6 +202,9 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     const sectionish = /第\s*\d|\d+\s*-\s*\d+\s*节/.test(s0);
     if (
       !sectionish &&
+      !/空教室|空着的教室/.test(s0) &&
+      /* 说了「图书馆…自习室」是在问某个馆内房间，别当成找空教室自习 */
+      !/图书馆.{0,10}(?:自习室|阅览室|区|房间)/.test(s0) &&
       /自习|学习|看书|刷题|写作业|泡馆|安静.{0,4}(?:看|学)|找个地方.{0,4}(?:学|看)/.test(s0)
     ) {
     const needMinutes = extractNeedMinutes(s0) ?? 120;
@@ -200,13 +233,14 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
         };
       }
       if (area && /地图|座位图|平面图|哪些|空着|座位|位置|空位|空座/.test(t0)) {
+        const room0 = extractRoomName(t0);
         return {
           tool: 'library_seat_map',
-          args: { areaId: area.id, date: d0 ?? today },
-          reason: `关键词：座位图（${area.name}）`,
+          args: { areaId: area.id, date: d0 ?? today, ...(room0 ? { room: room0 } : {}) },
+          reason: `关键词：座位图（${area.name}${room0 ? ` ${room0}` : ''}）`,
         };
       }
-      if (/座位|位置|空位|空座|还有位|有空|满|几楼|自习/.test(t0)) {
+      if (/座位|位置|空位|空座|几个?座|还剩?几|还有位|有空|满|几楼|自习|坐满|人多/.test(t0)) {
         return { tool: 'library_seats', args: d0 ? { date: d0 } : {}, reason: '关键词：图书馆座位余量' };
       }
     }
@@ -224,14 +258,15 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     };
   }
 
-  // LIB_BY_FLOOR_ONLY：只给楼层 + 「地图/座位图/空着」也走座位图
-  if (/地图|座位图|平面图|哪些座位|空着/.test(t) && extractLibraryArea(t) && !/教室/.test(t)) {
+  // LIB_BY_FLOOR_ONLY：只给楼层 + 「地图/座位图/空着/有哪些房间」也走座位图
+  if (/地图|座位图|平面图|哪些座位|空着|哪些房间|哪几间|几间(?:房|自习室)/.test(t) && extractLibraryArea(t) && !/教室/.test(t)) {
     const date = extractDate(t, today);
     const area = extractLibraryArea(t)!;
+    const room = extractRoomName(t);
     return {
       tool: 'library_seat_map',
-      args: { areaId: area.id, date: date ?? today },
-      reason: `关键词：座位图（${area.name}）`,
+      args: { areaId: area.id, date: date ?? today, ...(room ? { room } : {}) },
+      reason: `关键词：座位图（${area.name}${room ? ` ${room}` : ''}）`,
     };
   }
 
@@ -252,7 +287,7 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
 
   // 图书馆座位：问「还有位置吗」「空几个座」走实时余量；只说「预约座位」仍然走服务直达。
   // 放在空教室规则前面，否则「图书馆自习」会被当成「找空教室」。
-  if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|还有位|有空|满|几楼|自习|地图|座位图|平面图|哪些|空着/.test(t)) {
+  if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|几个?座|还剩?几|还有位|有空|满|几楼|自习|坐满|人多|地图|座位图|平面图|哪些|空着/.test(t)) {
     const date = extractDate(t, today);
     const area = extractLibraryArea(t);
     // 只要提到「订/约/抢」就说明想下单；带座位号直接进下单准备，否则先看座位图
@@ -380,12 +415,15 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     return { tool: 'find_notices', args, reason: '关键词：通知/公告' };
   }
 
-  if (/课表|有课|上课|课程|几节课|[周星期礼拜][一二三四五六日天1-7].*课|明天.*课|今天.*课/.test(t)) {
+  if (/课表|有课|上课|课程|几节课|[周星期礼拜][一二三四五六日天1-7].*课|明天.*课|今天.*课|(?:下周|上周|这周|本周).{0,8}课/.test(t)) {
     const week = extractWeek(t);
+    const weekOffset = relativeWeekOffset(t);
     const day = extractDay(t, today);
     const period = extractPeriod(t);
     const args: Record<string, unknown> = {};
+    // 「第 8 周」是硬定死的周次；「下周」交给工具按当前周 +1 算，别在这里猜。
     if (week !== undefined) args.week = week;
+    else if (weekOffset !== undefined) args.weekOffset = weekOffset;
     if (day !== undefined) args.day = day;
     if (period) args.period = period;
     return { tool: 'get_schedule', args, reason: '关键词：课表' };

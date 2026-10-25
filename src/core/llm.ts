@@ -455,7 +455,8 @@ function buildSystemPrompt(today: string): string {
     '   不要输出 JSON，也不要罗列功能清单。',
     '',
     '可用工具与参数：',
-    '- get_schedule：课表。args: { week?: number(1-20), day?: "today"|"tomorrow"|1-7 }',
+    '- get_schedule：课表。args: { week?: number(1-20，仅在用户说「第 N 周」时用绝对周次),' +
+      ' weekOffset?: number(0=本周、1=下周、-1=上周，用户说「下周/上周」时用它), day?: "today"|"tomorrow"|1-7 }',
     '- find_free_room：空教室/自习室。args: { date?: "YYYY-MM-DD", sections?: number[], minSeats?: number,' +
       ' campus?: string, building?: string }；building 填用户说的地点原词（南核 / 北核 / 北1 / 物理馆 / 材料馆）',
     '- find_notices：通知卡片（讲座/比赛/活动/会议/教务/生活）。args: { category?: "lecture"|"competition"|"activity"|"meeting"|"academic"|"life",' +

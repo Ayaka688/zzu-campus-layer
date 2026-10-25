@@ -139,14 +139,7 @@ export async function readLibrarySeats(args: {
   areaId: string;
   date: string;
 }): Promise<
-  LibTabResult<{
-    seats: { no: string; status: string; free: boolean }[];
-    areaId: string;
-    tried: string[];
-    raw?: unknown;
-    diag?: string;
-    date?: string;
-  }>
+  LibTabResult<LibSeatMap & { tried: string[]; raw?: unknown; diag?: string }>
 > {
   // DATE_CLAMP：座位图也只用服务端认的那两天（余量链路早就夹过，这里补上）
   {

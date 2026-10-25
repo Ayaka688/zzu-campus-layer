@@ -1,9 +1,9 @@
 /**
- * 聊天记录的端到端冒烟：换页面/重开之后，最近 5 条还在。
+ * 聊天记录的端到端冒烟：换页面/重开之后，最近 10 条还在。
  *
- * 起本地静态服务器 → Edge 无头 + 手机视口 → 往 localStorage 塞 7 条 →
- * 刷新 → 只显示后 5 条 → 再发一句话 → 仍然只有 5 条（最旧的被顶掉）→
- * 再刷新 → 落盘的是 5 条、顺序没变、图片这类重字段没进存档。
+ * 起本地静态服务器 → Edge 无头 + 手机视口 → 往 localStorage 塞 14 条 →
+ * 刷新 → 只显示后 10 条 → 再发一句话 → 仍然只有 10 条（最旧的被顶掉）→
+ * 再刷新 → 落盘的是 10 条、顺序没变、图片这类重字段没进存档。
  *
  * 不需要登录态：没 token 时会走「还没有登录态」那条分支，正好能验证实时截断。
  * 用法：node scripts/pwa-transcript.mjs（先 npm run build）
@@ -89,6 +89,13 @@ const STORED = `(() => {
   return raw ? JSON.parse(raw) : null;
 })()`;
 
+/** 聊天区的滚动状态：回头一看应该是 0（停在最上面），不是贴底 */
+const SCROLL = `(() => {
+  const el = [...document.querySelectorAll('main')].find((n) => n.querySelector('.msg'));
+  if (!el) return null;
+  return { top: Math.round(el.scrollTop), max: Math.round(el.scrollHeight - el.clientHeight) };
+})()`;
+
 function assert(ok, message) {
   if (!ok) throw new Error(message);
 }
@@ -165,30 +172,42 @@ async function main() {
     console.log('空存档:', JSON.stringify(blank));
     assert(blank.length === 0, `没有存档时不该有气泡，实际 ${blank.length}`);
 
-    /* 2) 塞 7 条进去（带一张座位图，验证重字段不会进存档） */
+    /* 2) 塞 14 条进去（每条够长，保证一屏放不下；第 9 条带座位图，验证重字段不会进存档） */
     await cdp.eval(`(() => {
-      const items = Array.from({ length: 7 }, (_, i) => ({
+      const filler = '这是一条够长的测试消息，用来把聊天区撑到需要滚动，好验证进来时直接贴在最底部。';
+      const items = Array.from({ length: 14 }, (_, i) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
-        text: '第 ' + (i + 1) + ' 条',
-        ...(i === 1 ? { tool: 'find_seat', data: { image: 'data:image/png;base64,AAAA', count: 2 } } : {}),
+        text: '第 ' + (i + 1) + ' 条：' + filler + filler,
+        ...(i === 8 ? { tool: 'find_seat', data: { image: 'data:image/png;base64,AAAA', count: 2 } } : {}),
       }));
       localStorage.setItem('${KEY}', JSON.stringify({ v: 1, at: Date.now(), items }));
       return 0;
     })()`);
 
-    /* 3) 刷新：只该显示后 5 条，顺序不变 */
+    /* 3) 刷新：只该显示后 10 条，顺序不变，并且一进来就停在最底部（不带滑动动画） */
     await cdp.send('Page.reload');
-    await sleep(1500);
+    await sleep(260); // 平滑滚到底至少要 300ms 以上，这个时间点还在飞就说明没瞬移
+    const restoredScroll = await cdp.eval(SCROLL);
+    console.log('恢复后滚动:', JSON.stringify(restoredScroll));
+    assert(restoredScroll && restoredScroll.max > 200, `测试用例本身要把列表撑到能滚，实际 max=${restoredScroll?.max}`);
+    // 260ms 时应该已经贴在底部了（平滑滚动这时候才滚到一半），留 16px 给字体加载带来的高度微调
+    assert(
+      restoredScroll.top >= restoredScroll.max - 16,
+      `恢复后应该直接在最底部，实际 top=${restoredScroll?.top} / max=${restoredScroll?.max}`,
+    );
+    await sleep(1000);
+    const settled = await cdp.eval(SCROLL);
+    assert(settled.top === settled.max, `稳定后应该正好在底部，实际 top=${settled.top} / max=${settled.max}`);
     const restored = await cdp.eval(SHOWN);
     console.log('恢复:', JSON.stringify(restored));
-    assert(restored.length === 5, `应该只显示 5 条，实际 ${restored.length}`);
-    assert(restored[0].includes('第 3 条'), `最上面应该是「第 3 条」，实际 ${JSON.stringify(restored[0])}`);
-    assert(restored[4].includes('第 7 条'), `最下面应该是「第 7 条」，实际 ${JSON.stringify(restored[4])}`);
+    assert(restored.length === 10, `应该只显示 10 条，实际 ${restored.length}`);
+    assert(restored[0].includes('第 5 条'), `最上面应该是「第 5 条」，实际 ${JSON.stringify(restored[0])}`);
+    assert(restored[9].includes('第 14 条'), `最下面应该是「第 14 条」，实际 ${JSON.stringify(restored[9])}`);
     await shot('pwa-transcript-1-restored.png');
 
-    /* 4) 落盘里也没有大图字段（第 2 条被截掉了，所以这里只验证整体） */
+    /* 4) 落盘里也没有大图字段（第 9 条带着图，洗完该没了） */
     const stored = await cdp.eval(STORED);
-    assert(stored?.items?.length === 5, `存档应该 5 条，实际 ${stored?.items?.length}`);
+    assert(stored?.items?.length === 10, `存档应该 10 条，实际 ${stored?.items?.length}`);
     assert(!JSON.stringify(stored).includes('data:image'), '座位图这种重字段不该进存档');
 
     /* 5) 现场再发一句：没 token 会回「还没有登录态」，最旧的一条被顶掉 */
@@ -196,24 +215,24 @@ async function main() {
     await sleep(900);
     const afterAsk = await cdp.eval(SHOWN);
     console.log('发一句后:', JSON.stringify(afterAsk));
-    assert(afterAsk.length === 5, `发完还应该只显示 5 条，实际 ${afterAsk.length}`);
-    assert(afterAsk[4].includes('还没有登录态'), `最后一条应该是登录提醒，实际 ${JSON.stringify(afterAsk[4])}`);
-    assert(!afterAsk.some((t) => t.includes('第 3 条')), '最旧的「第 3 条」应该被顶掉了');
+    assert(afterAsk.length === 10, `发完还应该只显示 10 条，实际 ${afterAsk.length}`);
+    assert(afterAsk[9].includes('还没有登录态'), `最后一条应该是登录提醒，实际 ${JSON.stringify(afterAsk[9])}`);
+    assert(!afterAsk.some((t) => t.includes('第 5 条')), '最旧的「第 5 条」应该被顶掉了');
     await shot('pwa-transcript-2-after-ask.png');
 
-    /* 6) 再刷新：刚才那句还在，仍然 5 条 */
+    /* 6) 再刷新：刚才那句还在，仍然 10 条 */
     await cdp.send('Page.reload');
     await sleep(1500);
     const again = await cdp.eval(SHOWN);
     console.log('再刷新:', JSON.stringify(again));
-    assert(again.length === 5, `刷新后应该还是 5 条，实际 ${again.length}`);
-    assert(again[4].includes('还没有登录态'), '刷新后最后一条丢了');
+    assert(again.length === 10, `刷新后应该还是 10 条，实际 ${again.length}`);
+    assert(again[9].includes('还没有登录态'), '刷新后最后一条丢了');
     const stored2 = await cdp.eval(STORED);
-    assert(stored2?.items?.length === 5, '存档没截到 5 条');
-    assert(stored2.items[4].text.includes('还没有登录态'), '存档里最后一条不对');
+    assert(stored2?.items?.length === 10, '存档没截到 10 条');
+    assert(stored2.items[9].text.includes('还没有登录态'), '存档里最后一条不对');
 
     cdp.close();
-    console.log('OK 聊天记录：刷新后恢复最近 5 条 / 现场截断 / 落盘只有 5 条 / 重字段不进存档');
+    console.log('OK 聊天记录：刷新后恢复最近 10 条 / 现场截断 / 落盘只有 10 条 / 重字段不进存档');
   } finally {
     if (edge) edge.kill();
     server.kill();
