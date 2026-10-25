@@ -19,9 +19,13 @@ final class AppConfig {
      */
     static final String LIB_LOGIN_URL = "http://order.lib.zzu.edu.cn/h5/index.html#/seat/index";
 
+    /**
+     * 壳内登录入口。service 用**教务自己的 uniapp 入口**——实测这条链拿到的 idToken 是
+     * 30 天那档；早先指向门户首页（pages/tab/index/index）拿到的是 8 小时那档。
+     */
     static final String LOGIN_URL =
             "https://cas.s.zzu.edu.cn/cas/login?service="
-            + "https%3A%2F%2Funiapp.s.zzu.edu.cn%2Fpages%2Ftab%2Findex%2Findex";
+            + "https%3A%2F%2Fjwxt.zzu.edu.cn%2Funiapp%2Findex.html";
 
     /** 备用入口：学校自带的树维登录页（万一 CAS 那边改了路由，还能从这里手动兜） */
     static final String LOGIN_URL_FALLBACK = "https://jwxt.zzu.edu.cn/uniapp/index.html";
