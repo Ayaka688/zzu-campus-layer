@@ -157,6 +157,19 @@ export async function readLibrarySeats(args: {
       return { ok: false, error: '原生桥返回的不是 JSON' };
     }
     if (!outer.ok) return { ok: false, error: outer.error ?? '图书馆接口失败' };
+
+    // 服务端把「被别处顶掉」也放在 200 里（code=10001），必须翻成人话
+    const raw = (outer.raw ?? {}) as { code?: number | string; message?: string };
+    if (String(raw.code) === '10001') {
+      const msg = String(raw.message ?? '');
+      const kicked = /其他设备|其他终端|已在别处|已从其他/.test(msg);
+      return {
+        ok: false,
+        error: kicked
+          ? '图书馆只允许一台设备在线：刚才在手机或电脑上登录过，这里被顶掉了。点「登录图书馆」重登一次就好。'
+          : `图书馆要重新登录（${msg || '未登录'}）：点菜单里的「登录图书馆」。`,
+      };
+    }
     return {
       ok: true,
       data: {
