@@ -20,6 +20,8 @@ import android.widget.Toast;
 public class LibLoginActivity extends Activity {
     private WebView web;
     private boolean done;
+    private final android.os.Handler poll = new android.os.Handler(android.os.Looper.getMainLooper());
+    private int tries;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,6 +50,7 @@ public class LibLoginActivity extends Activity {
             if (extra != null && !extra.trim().isEmpty()) start = extra;
         }
         web.loadUrl(start);
+        startPolling();
         Toast.makeText(this, "登录完成后会自动回到应用", Toast.LENGTH_LONG).show();
     }
 
@@ -71,6 +74,23 @@ public class LibLoginActivity extends Activity {
         return super.onOptionsItemSelected(item);
     }
 
+
+    /** 那个站点登录后不一定触发 onPageFinished，所以每 1.5 秒自己去问一次 token。 */
+    private void startPolling() {
+        poll.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (done || isFinishing()) return;
+                harvest();
+                if (!done && tries++ < 60) poll.postDelayed(this, 1500);
+            }
+        }, 1500);
+    }
+
+    @Override
+    protected void onDestroy() {
+        poll.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
     private void harvest() {
         if (done) return;
         // 图书馆站点把登录票据放在 sessionStorage.token；顺带兼容 cookie 里的 userToken

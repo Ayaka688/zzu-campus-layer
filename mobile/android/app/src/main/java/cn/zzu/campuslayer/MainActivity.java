@@ -80,7 +80,12 @@ public class MainActivity extends Activity {
         /** 图书馆馆级余量（免登录）。 */
         @android.webkit.JavascriptInterface
         public void libTopFor(final String areaId, final String date, final String reqId) {
+            web.post(new Runnable() {
+                @Override public void run() {
             LibSeatClient.fetchTopAsync(web, MainActivity.this, areaId, date, reqId);
+        
+                }
+            });
         }
 
         /** 是否已抓过图书馆票据。 */
@@ -99,6 +104,8 @@ public class MainActivity extends Activity {
         /** 图书馆座位（只读）：有票据就原生直连取，没有就引导去登录。 */
         @android.webkit.JavascriptInterface
         public void libSeats(final String areaId, final String date, final String reqId) {
+            web.post(new Runnable() {
+                @Override public void run() {
             if (!LibSeatClient.loggedIn(MainActivity.this)) {
                 String js = "window.__libSeats&&window.__libSeats("
                         + org.json.JSONObject.quote(reqId) + ","
@@ -109,6 +116,9 @@ public class MainActivity extends Activity {
                 return;
             }
             LibSeatClient.fetchAsync(web, MainActivity.this, areaId, date, reqId);
+        
+                }
+            });
         }
 
         @JavascriptInterface
