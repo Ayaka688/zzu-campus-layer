@@ -151,6 +151,57 @@ export async function resolveLibraryDate(date?: string): Promise<{ date: string;
   return { date: dates[0] ?? fallback, dates, adjusted: Boolean(wanted) };
 }
 
+/* 楼层名 ← 旧的写死 id（一楼早先写成 3，服务端楼层表里主校区一楼其实是 2） */
+const FLOOR_OF_LEGACY_ID: Record<string, string> = {
+  '2': '一楼', '3': '一楼', '71': '一楼', '61': '一楼',
+  '4': '二楼', '72': '二楼', '24': '二楼',
+  '5': '三楼', '52': '三楼',
+  '6': '四楼', '53': '四楼',
+};
+
+type FloorMap = { at: number; floors: Record<string, string> };
+let _floorCache: FloorMap | null = null;
+
+/**
+ * 按「楼层名 + 馆 id」从服务端楼层表现查区域 id（主校区 premiseId='1'）。
+ * 失败时原样返回传入的 id，保持旧行为。
+ */
+export async function resolveLibraryArea(areaId: string, premiseId = '1'): Promise<string> {
+  const floor = FLOOR_OF_LEGACY_ID[areaId];
+  if (!floor) return areaId;
+  if (_floorCache && Date.now() - _floorCache.at < 5 * 60 * 1000 && _floorCache.floors[floor]) {
+    return _floorCache.floors[floor] as string;
+  }
+  try {
+    const res = await send<{
+      data?: { storey?: Array<{ name?: string; list?: Array<{ id?: string | number; parentId?: string | number }> }> };
+    }>(LIB_BASE + '/v4/space/index', {
+      method: 'POST',
+      body: JSON.stringify({ id: premiseId }),
+      token: '',
+      source: 'portal',
+    });
+    const floors: Record<string, string> = {};
+    for (const st of res?.data?.storey ?? []) {
+      const name = String(st?.name ?? '');
+      for (const item of st?.list ?? []) {
+        if (String(item?.parentId ?? '') === premiseId && item?.id != null) {
+          floors[name] = String(item.id);
+          break;
+        }
+      }
+    }
+    if (Object.keys(floors).length) {
+      _floorCache = { at: Date.now(), floors };
+      const hit = floors[floor];
+      if (hit) return hit;
+    }
+  } catch {
+    /* 查不到就用传进来的 id */
+  }
+  return areaId;
+}
+
 export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
   const resolved = await resolveLibraryDate(opts.date);
   opts = { ...opts, date: resolved.date };  const bridgedTop = bridgeTopFor(opts.date ?? '');
