@@ -145,6 +145,7 @@ export async function readLibrarySeats(args: {
     tried: string[];
     raw?: unknown;
     diag?: string;
+    date?: string;
   }>
 > {
   // DATE_CLAMP：座位图也只用服务端认的那两天（余量链路早就夹过，这里补上）
@@ -206,6 +207,7 @@ export async function readLibrarySeats(args: {
     areaId: string;
     tried: string[];
     raw?: unknown;
+    date?: string;
   } = {
     seats: [],
     areaId: args.areaId,
@@ -231,7 +233,7 @@ export async function readLibrarySeats(args: {
         parsed = parseSeatMap(payload);
       }
     }
-    const here = { seats: parsed.seats, areaId: id, tried, raw: payload };
+    const here = { seats: parsed.seats, areaId: id, tried, raw: payload, date: args.date };
     if (parsed.seats.length > 0) return { ok: true, data: here };
     empty = here;
   }

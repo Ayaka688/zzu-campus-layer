@@ -273,6 +273,10 @@ export interface LibSeatMap {
   total?: number;
   free?: number;
   seats: LibSeat[];
+  /** 实际使用的日期（服务端只认今天/明天，会被夹紧） */
+  date?: string;
+  /** 实际使用的区域 id */
+  areaId?: string;
 }
 
 /**
@@ -521,7 +525,10 @@ export function renderSeatMap(m: LibSeatMap, opts: { limit?: number } = {}): str
   const rows: string[] = [];
   const area = m.areaName ? ` · ${m.areaName}` : '';
   const freeSeats = m.seats.filter((s) => s.free);
-  rows.push(`**图书馆座位图${area}**`, '');
+  const meta = [m.date ? `日期 ${m.date}` : '', m.areaName ? m.areaName : m.areaId ? `区域 ${m.areaId}` : '']
+    .filter(Boolean)
+    .join(' · ');
+  rows.push(`**图书馆座位图${area}**`, meta ? `${meta}\n` : '');
   if (!m.seats.length) {
     rows.push('没解析出座位（可能接口字段变了，或者座位图还没加载完）。');
     return rows.join('\n');
