@@ -4,7 +4,7 @@ import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
 import { planStudy, renderStudyPlan } from './study';
-import { seatMapDataUri } from './library';
+import { librarySeatUrl, seatMapDataUri } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, todayShanghai, weekdayOf } from './util';
@@ -431,7 +431,11 @@ export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string }
   async run(args) {
     const res = await readLibrarySeats(args);
     if (!res.ok || !res.data) {
-      return { text: res.error ?? '读不到座位图。', data: { error: true } };
+      const openUrl = librarySeatUrl(args.areaId, args.date);
+        return {
+          text: res.error ?? '读不到座位图。',
+          data: { error: true, url: openUrl, name: '座位预约', args },
+        };
     }
     if (!res.data.seats.length) {
       const raw = JSON.stringify(res.data.raw ?? res.data).slice(0, 900);
