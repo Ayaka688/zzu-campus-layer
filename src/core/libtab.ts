@@ -9,6 +9,7 @@
  * 找不到标签页不是错误，而是「这条路现在不能用」——调用方要能优雅降级。
  */
 
+import { resolveLibraryDate } from './library';
 import { parseSeatMap, type LibSeatMap } from './library';
 import type { BookOutcome } from './libBook';
 
@@ -146,6 +147,11 @@ export async function readLibrarySeats(args: {
     diag?: string;
   }>
 > {
+  // DATE_CLAMP：座位图也只用服务端认的那两天（余量链路早就夹过，这里补上）
+  {
+    const fixed = (await resolveLibraryDate(args.date)).date;
+    args = { ...args, date: fixed };
+  }
   // 安卓壳：走原生桥（原生 HTTP 不受 CORS / 混合内容限制）
   const bridged = bridgeNativeSeats(args.areaId, args.date);
   if (bridged) {
