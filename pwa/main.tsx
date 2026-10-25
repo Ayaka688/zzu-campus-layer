@@ -1,4 +1,5 @@
 import { render } from 'preact';
+import { HoldButton } from '../src/ui/hold';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
 import { getKV, parseImportLink } from '../src/core/kv';
@@ -68,6 +69,10 @@ const CAS_LOGIN_PORTAL =
 
 /* 常用语改成可编辑列表（原来写死在 QUICK 里）：存 kv，改动立刻落盘。
    初始值先用出厂的，等 refresh() 读到用户自己的列表再替换，避免闪一下空条。 */
+
+function pushNote(text: string) {
+  window.dispatchEvent(new CustomEvent("campus-note", { detail: text }));
+}
 
 function App() {
   const [statuses, setStatuses] = useState<TokenStatus[]>([]);
@@ -716,6 +721,13 @@ function App() {
                   <figcaption>绿点是空的 · 灰点已占</figcaption>
                 </figure>
               )}
+              {m.role === 'assistant' && !m.error && m.data?.action && (
+                <HoldButton
+                  label={String((m.data.action as { label?: string }).label ?? '长按确认预约')}
+                  hint="长按 1.2 秒才会真的提交，松手取消"
+                  onConfirm={() => void confirmBook(m.data!.action as { areaId: string; date: string; seatNo: string })}
+                />
+              )}
               {m.role === 'assistant' && !m.error && typeof m.data?.url === 'string' && (
                 <a class="go" href={m.data.url} target="_blank" rel="noreferrer">
                   打开 {typeof m.data.name === 'string' ? m.data.name : '链接'} ↗
@@ -794,4 +806,29 @@ function App() {
   );
 }
 
+/** 长按确认后真的下单：壳里有原生桥就走桥；浏览器里没有这个能力。 */
+async function confirmBook(action: { areaId: string; date: string; seatNo: string }) {
+  const bridge = (window as unknown as {
+    CampusNotify?: { bookSeat?: (a: string, d: string, s: string, req: string) => void };
+  }).CampusNotify;
+  if (!bridge?.bookSeat) {
+    pushNote("下单只能在安卓壳里做（或电脑端扩展）：手机浏览器没有向图书馆页面提交的权限。");
+    return;
+  }
+  const reqId = String(Date.now());
+  const r = await new Promise<{ ok: boolean; error?: string; msg?: string }>((resolve) => {
+    const w = window as unknown as Record<string, unknown>;
+    const timer = setTimeout(() => resolve({ ok: false, error: "等了 60 秒没回音，可能页面卡住了" }), 60000);
+    w.__libSeats = (_id: string, json: string) => {
+      clearTimeout(timer);
+      try {
+        resolve(JSON.parse(json) as { ok: boolean; error?: string; msg?: string });
+      } catch {
+        resolve({ ok: false, error: "原生返回的内容看不懂" });
+      }
+    };
+  });
+  bridge.bookSeat(action.areaId, action.date, action.seatNo, reqId);
+  pushNote(r.ok ? `座位 ${action.seatNo} 预约成功（${r.msg ?? "页面已提示成功"}）` : `没约成：${r.error ?? "未知原因"}`);
+}
 render(<App />, document.getElementById('app')!);
