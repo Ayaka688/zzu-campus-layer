@@ -1002,7 +1002,7 @@ header .chip + .mini {
 }
 
 
-/* ===== 可换配色：黑 + 藏青（html[data-theme=ink]），默认仍是米白 ===== */
+/* ===== 可换配色：黑 + 藏青 / 黑 + 蓝绿（html[data-theme=ink|teal]），默认仍是米白 ===== */
 .theme-switch {
   position: fixed;
   right: 10px;
@@ -1022,136 +1022,205 @@ header .chip + .mini {
   opacity: 0.85;
 }
 
+/* 两套深色共用同一个骨架，具体颜色全走变量：
+   ink = 黑 + 藏青，teal = 墨绿底 + 蓝绿。想再换一套只加一组变量即可。 */
 html[data-theme='ink'] {
   --bg: #0b1220;
   --panel: #101a2c;
   --text: #e8eefa;
   --dim: #8ea0bd;
   --accent: #2f5fe0;
+  --shade: #0e1728;
+  --hairline: #24334f;
+  --link: #7aa2ff;
+  --placeholder: #6d7d9a;
+  --self-bubble: #2f5fe0;
+  --self-bubble-text: #f2f6ff;
+  --header-line: #1e2c45;
   color-scheme: dark;
 }
 
-html[data-theme='ink'] body {
-  background: #0b1220;
-  color: #e8eefa;
+html[data-theme='teal'] {
+  --bg: #07191a;
+  --panel: #0d2526;
+  --text: #e5f7f4;
+  --dim: #8fb5b1;
+  --accent: #0f8b7d;
+  --shade: #0a2021;
+  --hairline: #1c4343;
+  --link: #3ad1bd;
+  --placeholder: #5f8782;
+  --self-bubble: #0f8b7d;
+  --self-bubble-text: #f0fffc;
+  --header-line: #1a3b3b;
+  --ok: #4ec9a0;
+  --warn: #e0b060;
+  --err: #ef6b6b;
+  color-scheme: dark;
 }
 
-html[data-theme='ink'] header {
+html[data-theme='ink'] body,
+html[data-theme='teal'] body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+html[data-theme='ink'] header,
+html[data-theme='teal'] header {
   background: transparent !important;
-  color: #e8eefa !important;
-  border-bottom: 1px solid #1e2c45 !important;
+  color: var(--text) !important;
+  border-bottom: 1px solid var(--header-line) !important;
 }
 
 html[data-theme='ink'] header .chip,
-html[data-theme='ink'] header .mini {
-  color: #8ea0bd !important;
+html[data-theme='ink'] header .mini,
+html[data-theme='teal'] header .chip,
+html[data-theme='teal'] header .mini {
+  color: var(--dim) !important;
 }
 
-html[data-theme='ink'] .bubble {
-  background: #101a2c !important;
-  color: #e8eefa !important;
+html[data-theme='ink'] .bubble,
+html[data-theme='teal'] .bubble {
+  background: var(--panel) !important;
+  color: var(--text) !important;
 }
 
 html[data-theme='ink'] .bubble.me,
 html[data-theme='ink'] .bubble.user,
-html[data-theme='ink'] .bubble.user-msg {
-  background: #2f5fe0 !important;
-  color: #f2f6ff !important;
+html[data-theme='ink'] .bubble.user-msg,
+html[data-theme='teal'] .bubble.me,
+html[data-theme='teal'] .bubble.user,
+html[data-theme='teal'] .bubble.user-msg {
+  background: var(--self-bubble) !important;
+  color: var(--self-bubble-text) !important;
 }
 
 html[data-theme='ink'] .quick button,
-html[data-theme='ink'] .quick {
-  color: #8ea0bd !important;
+html[data-theme='ink'] .quick,
+html[data-theme='teal'] .quick button,
+html[data-theme='teal'] .quick {
+  color: var(--dim) !important;
   background: transparent !important;
 }
 
-html[data-theme='ink'] .dock {
-  background: #0e1728 !important;
+html[data-theme='ink'] .dock,
+html[data-theme='teal'] .dock {
+  background: var(--shade) !important;
 }
 
-html[data-theme='ink'] .dock .composer input {
-  color: #e8eefa !important;
+html[data-theme='ink'] .dock .composer input,
+html[data-theme='teal'] .dock .composer input {
+  color: var(--text) !important;
   background: transparent !important;
-  border-bottom: 1px solid #24334f !important;
+  border-bottom: 1px solid var(--hairline) !important;
 }
 
-html[data-theme='ink'] .dock .composer input::placeholder {
-  color: #6d7d9a !important;
+html[data-theme='ink'] .dock .composer input::placeholder,
+html[data-theme='teal'] .dock .composer input::placeholder {
+  color: var(--placeholder) !important;
 }
 
-html[data-theme='ink'] .dock .composer button {
-  color: #7aa2ff !important;
+html[data-theme='ink'] .dock .composer button,
+html[data-theme='teal'] .dock .composer button {
+  color: var(--link) !important;
 }
 
-html[data-theme='ink'] .dock .deco {
+html[data-theme='ink'] .dock .deco,
+html[data-theme='teal'] .dock .deco {
   opacity: 0.45;
   filter: grayscale(1) brightness(0.85);
 }
 
-html[data-theme='ink'] .sheet {
-  background: #0e1728 !important;
+html[data-theme='ink'] .sheet,
+html[data-theme='teal'] .sheet {
+  background: var(--shade) !important;
 }
 
 html[data-theme='ink'] .sheet textarea,
 html[data-theme='ink'] .sheet input[type='text'],
-html[data-theme='ink'] .sheet select {
-  background: #101a2c !important;
-  color: #e8eefa !important;
-  border: 1px solid #24334f !important;
+html[data-theme='ink'] .sheet select,
+html[data-theme='teal'] .sheet textarea,
+html[data-theme='teal'] .sheet input[type='text'],
+html[data-theme='teal'] .sheet select {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--hairline) !important;
 }
 
 html[data-theme='ink'] button.primary,
-html[data-theme='ink'] a.primary {
-  background: #2f5fe0 !important;
-  color: #f2f6ff !important;
+html[data-theme='ink'] a.primary,
+html[data-theme='teal'] button.primary,
+html[data-theme='teal'] a.primary {
+  background: var(--accent) !important;
+  color: var(--self-bubble-text) !important;
 }
 
 html[data-theme='ink'] button.ghost,
 html[data-theme='ink'] a.ghost,
-html[data-theme='ink'] button.mini {
-  background: #101a2c !important;
-  color: #e8eefa !important;
+html[data-theme='ink'] button.mini,
+html[data-theme='teal'] button.ghost,
+html[data-theme='teal'] a.ghost,
+html[data-theme='teal'] button.mini {
+  background: var(--panel) !important;
+  color: var(--text) !important;
 }
 
 html[data-theme='ink'] .nb,
-html[data-theme='ink'] .nb * {
-  color: #e8eefa !important;
+html[data-theme='ink'] .nb *,
+html[data-theme='teal'] .nb,
+html[data-theme='teal'] .nb * {
+  color: var(--text) !important;
 }
 
 html[data-theme='ink'] .nb-hint,
 html[data-theme='ink'] .nb-readtag,
-html[data-theme='ink'] .nb-empty {
-  color: #8ea0bd !important;
+html[data-theme='ink'] .nb-empty,
+html[data-theme='teal'] .nb-hint,
+html[data-theme='teal'] .nb-readtag,
+html[data-theme='teal'] .nb-empty {
+  color: var(--dim) !important;
 }
 
 html[data-theme='ink'] .nb-card-top,
-html[data-theme='ink'] .nb .nb-list > * {
-  background: #101a2c !important;
-  border-bottom: 1px solid #24334f !important;
+html[data-theme='ink'] .nb .nb-list > *,
+html[data-theme='teal'] .nb-card-top,
+html[data-theme='teal'] .nb .nb-list > * {
+  background: var(--panel) !important;
+  border-bottom: 1px solid var(--hairline) !important;
 }
 
 html[data-theme='ink'] .nb-tabs,
 html[data-theme='ink'] .nb-actions,
 html[data-theme='ink'] .nb-subs,
-html[data-theme='ink'] .nb-today {
-  border-bottom: 1px solid #24334f !important;
+html[data-theme='ink'] .nb-today,
+html[data-theme='teal'] .nb-tabs,
+html[data-theme='teal'] .nb-actions,
+html[data-theme='teal'] .nb-subs,
+html[data-theme='teal'] .nb-today {
+  border-bottom: 1px solid var(--hairline) !important;
 }
 
 html[data-theme='ink'] .nb-tab + .nb-tab,
 html[data-theme='ink'] .nb-btn + .nb-btn,
-html[data-theme='ink'] .nb-mini + .nb-mini {
-  border-left: 1px solid #24334f !important;
+html[data-theme='ink'] .nb-mini + .nb-mini,
+html[data-theme='teal'] .nb-tab + .nb-tab,
+html[data-theme='teal'] .nb-btn + .nb-btn,
+html[data-theme='teal'] .nb-mini + .nb-mini {
+  border-left: 1px solid var(--hairline) !important;
 }
 
 html[data-theme='ink'] .hint,
-html[data-theme='ink'] .note {
-  color: #8ea0bd;
+html[data-theme='ink'] .note,
+html[data-theme='teal'] .hint,
+html[data-theme='teal'] .note {
+  color: var(--dim);
 }
 
 /* 配色行（设置面板内）与城堡保持原色 */
 .theme-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 0 4px;
 }
@@ -1166,7 +1235,8 @@ html[data-theme='ink'] .note {
   background: var(--accent) !important;
   color: #fff !important;
 }
-html[data-theme='ink'] .dock .deco {
+html[data-theme='ink'] .dock .deco,
+html[data-theme='teal'] .dock .deco {
   opacity: 0.92 !important;
   filter: none !important;
 }

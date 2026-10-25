@@ -74,6 +74,20 @@ function pushNote(text: string) {
   window.dispatchEvent(new CustomEvent("campus-note", { detail: text }));
 }
 
+/** 三套配色。teal 是后加的「蓝绿」：和 ink 共用深色骨架，只换一组变量。 */
+type ThemeName = 'cream' | 'ink' | 'teal';
+
+/** 状态栏/地址栏跟着配色走，免得换完主题上边还留着旧颜色。 */
+const THEME_COLOR: Record<ThemeName, string> = {
+  cream: '#f4ebd7',
+  ink: '#0b1220',
+  teal: '#07191a',
+};
+
+function syncThemeMeta(next: ThemeName): void {
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[next]);
+}
+
 function App() {
   const [statuses, setStatuses] = useState<TokenStatus[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -105,11 +119,12 @@ function App() {
   const [noticeDigest, setNoticeDigest] = useState<TodayDigest | null>(null);
   /* 两类通知分开控制：课前提醒默认开（学生本来就想被提醒），资讯通知默认关（不打扰）。 */
   const [notifyClass, setNotifyClass] = useState(true);
-  /* 配色：cream=米白（默认）/ ink=黑+藏青 */
-  const [theme, setTheme] = useState<'cream' | 'ink'>('ink');
-  const applyTheme = async (next: 'cream' | 'ink') => {
+  /* 配色：cream=米白（默认）/ ink=黑+藏青 / teal=黑+蓝绿 */
+  const [theme, setTheme] = useState<ThemeName>('ink');
+  const applyTheme = async (next: ThemeName) => {
     setTheme(next);
     document.documentElement.dataset.theme = next;
+    syncThemeMeta(next);
     await getKV().set('theme', next);
   };
   const [notifyNews, setNotifyNews] = useState(false);
@@ -130,9 +145,10 @@ function App() {
     setLlm(await getLlmSettings());
     setNoticePrefsState(await getNoticePrefs());
       const themePref = await getKV().get<string>('theme');
-      const t = themePref === 'cream' ? 'cream' : 'ink';
+      const t: ThemeName = themePref === 'cream' || themePref === 'teal' ? themePref : 'ink';
       setTheme(t);
       document.documentElement.dataset.theme = t;
+      syncThemeMeta(t);
       const classPref = await getKV().get<boolean>('notifyClass');
       const newsPref = await getKV().get<boolean>('notifyNews');
       setNotifyClass(classPref !== false);
@@ -653,6 +669,7 @@ function App() {
               <span>配色</span>
               <button type="button" class={theme === 'cream' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('cream')}>米白</button>
               <button type="button" class={theme === 'ink' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('ink')}>藏青</button>
+              <button type="button" class={theme === 'teal' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('teal')}>蓝绿</button>
             </div>
             <label class="row" style="align-items:center;gap:8px">
             <input
