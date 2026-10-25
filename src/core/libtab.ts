@@ -64,6 +64,17 @@ async function pageToken(tabId: number): Promise<string> {
 }
 
 /** 后台直接打图书馆接口（host_permissions 已含该域，SW 的 fetch 不受页面 CORS 限制） */
+/** 把服务端返回浓缩成一行诊断：code / message / list 条数 / 是否含 day。 */
+function describePayload(raw: unknown): string {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const data = (o.data ?? {}) as Record<string, unknown>;
+  const list = (data.list ?? data.seats ?? []) as unknown[];
+  const code = o.code ?? o.status ?? "?";
+  const msg = typeof o.message === "string" ? o.message : typeof o.msg === "string" ? o.msg : "";
+  const keys = Object.keys(data).slice(0, 6).join(",");
+  return `code=${String(code)} msg=${msg || "-"} list=${Array.isArray(list) ? list.length : "非数组"} keys=${keys || "-"}`;
+}
+
 async function fetchSeatsDirect(areaId: string, day: string, token: string): Promise<unknown> {
   const res = await fetch('http://order.lib.zzu.edu.cn/v4/Space/seat', {
     method: 'POST',
@@ -147,7 +158,12 @@ export async function readLibrarySeats(args: {
     if (!outer.ok) return { ok: false, error: outer.error ?? '图书馆接口失败' };
     return {
       ok: true,
-      data: { seats: parseSeatMap(outer.raw).seats, areaId: args.areaId, tried: [args.areaId] },
+      data: {
+        seats: parseSeatMap(outer.raw).seats,
+        areaId: args.areaId,
+        tried: [args.areaId],
+        diag: describePayload(outer.raw),
+      },
     };
   }
   const tab = await findLibraryTab();
