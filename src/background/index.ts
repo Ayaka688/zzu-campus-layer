@@ -11,6 +11,7 @@ import {
 } from '../core/notice';
 import { setNoticeFocus } from '../core/noticeStore';
 import { CampusService } from '../core/services';
+import type { CampusSession } from '../core/services';
 import {
   ensureValidToken,
   clearTokens,
@@ -27,6 +28,7 @@ import {
   setWatchState,
 } from '../core/storage';
 import { mintApiKey, probeLlm, resolveProvider } from '../core/llm';
+import { ensureRenewed, hasUsableToken } from '../core/renew';
 import { bookLibrarySeat, findLibraryTab } from '../core/libtab';
 import { describeBook, type BookOutcome } from '../core/libBook';
 import { TOOLS, getNoticeBody, runTool } from '../core/tools';
@@ -59,6 +61,17 @@ function installSidePanelBehaviour(): void {
 
 chrome.runtime.onInstalled.addListener(installSidePanelBehaviour);
 chrome.runtime.onStartup.addListener(installSidePanelBehaviour);
+
+/**
+ * 取登录态；手上的票全过期了，就先试着用 CAS 会话自动续一次
+ * （浏览器里 CAS 勾了「记住我」才续得上，续不上就照旧提示去登录）。
+ */
+async function sessionOrRenew(): Promise<CampusSession> {
+  const session = await loadSession();
+  if (hasUsableToken(await tokenStatuses())) return session;
+  if (!(await ensureRenewed())) return session;
+  return loadSession();
+}
 
 async function handle(message: Incoming): Promise<Reply> {
   switch (message.type) {
@@ -96,7 +109,7 @@ async function handle(message: Incoming): Promise<Reply> {
       await clearTokens();
       return { ok: true };
     case 'ask': {
-      const session = await loadSession();
+      const session = await sessionOrRenew();
       if (!session.jwxtToken && !session.portalToken) {
         return {
           ok: false,
@@ -140,7 +153,7 @@ async function handle(message: Incoming): Promise<Reply> {
         return { ok: false, error: (e as Error).message };
       }
     case 'tool': {
-      const session = await loadSession();
+      const session = await sessionOrRenew();
       if (!session.jwxtToken && !session.portalToken) {
         return { ok: false, error: '还没有 token，请先登录一次校园系统。' };
       }
