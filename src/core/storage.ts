@@ -135,7 +135,7 @@ export interface LlmSettingsStored {
 }
 
 const DEFAULT_SETTINGS: LlmSettingsStored = {
-  enabled: false,
+  enabled: true,
   provider: 'school',
   apiKey: '',
   model: 'DeepSeek-R1',

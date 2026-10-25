@@ -11,6 +11,9 @@
  * 只支持 http（443 拒绝连接），且仅校内网可达——校外用户会拿到明确的错误文案。
  */
 
+import { send } from './http';
+import { todayShanghai } from './util';
+
 export const LIB_BASE = 'http://order.lib.zzu.edu.cn';
 
 export interface LibraryPremise {
@@ -54,7 +57,117 @@ export function librarySeatUrl(premiseId: string, date: string): string {
   return `${LIB_BASE}/h5/index.html#/seat/space?id=${encodeURIComponent(premiseId)}&date=${encodeURIComponent(date)}`;
 }
 
+interface LibTopBridge {
+  libTopFor?: (areaId: string, date: string, reqId: string) => void;
+  libLoggedIn?: () => boolean;
+  loginLibrary?: () => void;
+}
+
+interface LibTopWindow {
+  CampusNotify?: LibTopBridge;
+  __libSeats?: (reqId: string, json: string) => void;
+  __libSeatWaiters?: Record<string, (json: string) => void>;
+}
+
+function bridgeTopFor(date: string): Promise<string> | null {
+  const w = (typeof window === 'undefined' ? undefined : window) as LibTopWindow | undefined;
+  const bridge = w?.CampusNotify;
+  if (!w || !bridge || typeof bridge.libTopFor !== 'function') return null;
+  const reqId = 'top' + Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
+  w.__libSeatWaiters = w.__libSeatWaiters ?? {};
+  w.__libSeats = (id: string, json: string) => {
+    const fn = w.__libSeatWaiters?.[id];
+    if (fn) {
+      delete w.__libSeatWaiters![id];
+      fn(json);
+    }
+  };
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      delete w.__libSeatWaiters![reqId];
+      reject(new Error('[原生] 图书馆接口超时（20 秒没回）'));
+    }, 20_000);
+    w.__libSeatWaiters![reqId] = (json: string) => {
+      clearTimeout(timer);
+      resolve(json);
+    };
+    bridge.libTopFor!('1', date, reqId);
+  });
+}
+
+export function parseTopFor(
+  data: { date?: string[]; list?: RawPremise[] },
+  date = '',
+): LibrarySeats {
+  const dates = Array.isArray(data.date) ? data.date.map(String) : [];
+  const picked = date || dates[0] || '';
+  const premises = (data.list ?? []).map((x) => {
+    const floors = Array.isArray(x.children)
+      ? x.children.map((c) => ({
+          id: String(c.id ?? ''),
+          name: String(c.name ?? ''),
+          total: num(c.total_num),
+          free: num(c.free_num),
+        }))
+      : [];
+    return {
+      id: String(x.id ?? ''),
+      name: String(x.name ?? ''),
+      total: num(x.total_num),
+      free: num(x.free_num),
+      ...(floors.length ? { floors } : {}),
+    };
+  });
+  return {
+    date: picked,
+    dates,
+    premises,
+    url: librarySeatUrl(premises[0]?.id ?? '1', picked),
+  };
+}
+
+
+/**
+ * 从图书馆服务端读「它接受哪两天」，并把调用方给的日期夹进这个范围。
+ * 原因：该接口只接受今天/明天，其它日期一律回 code:0 + 空列表（不是报错），
+ * 一旦某台设备的本地日期算偏一天，就会稳定读不到座位。
+ */
+export async function resolveLibraryDate(date?: string): Promise<{ date: string; dates: string[]; adjusted: boolean }> {
+  let dates: string[] = [];
+  try {
+    const res = await send<{ data?: { date?: string[] } }>(
+      LIB_BASE + '/v4/space/index',
+      { method: 'POST', body: JSON.stringify({ id: '1' }), token: '', source: 'portal' },
+    );
+    const list = res?.data?.date;
+    if (Array.isArray(list)) dates = list.filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
+  } catch {
+    /* 读不到就退回调用方给的日期，别把功能卡死 */
+  }
+  const wanted = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '';
+  const fallback = todayShanghai() as string;
+  if (!dates.length) return { date: wanted || fallback, dates: [], adjusted: false };
+  if (wanted && dates.includes(wanted)) return { date: wanted, dates, adjusted: false };
+  return { date: dates[0] ?? fallback, dates, adjusted: Boolean(wanted) };
+}
+
 export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
+  const resolved = await resolveLibraryDate(opts.date);
+  opts = { ...opts, date: resolved.date };  const bridgedTop = bridgeTopFor(opts.date ?? '');
+  if (bridgedTop) {
+    const raw = await bridgedTop;
+    let outer: { ok?: boolean; error?: string; raw?: unknown };
+    try {
+      outer = JSON.parse(raw) as { ok?: boolean; error?: string; raw?: unknown };
+    } catch {
+      throw new Error('原生桥返回的不是 JSON');
+    }
+    if (!outer.ok) throw new Error(`[原生] ${outer.error ?? '图书馆接口失败'}`);
+    const data = (outer.raw as { data?: { date?: string[]; list?: RawPremise[] } }).data;
+    if (!data) throw new Error('图书馆接口没返回 data');
+    return parseTopFor(data, opts.date ?? '');
+  }
+
   const date = opts.date ?? '';
   let res: Response;
   try {
@@ -72,7 +185,7 @@ export async function librarySeats(opts: { date?: string } = {}): Promise<Librar
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`连不上图书馆预约系统（${msg}）。它只有校内网能访问，校外请先连 VPN。`);
+    throw new Error(`连不上图书馆预约系统（${msg}）【走的是网页直连，没用上原生桥】。它只在校内网能访问，校外先连 VPN；若你在安卓壳里看到这句，说明壳版本过旧或页面缓存没刷新。`);
   }
 
   if (!res.ok) throw new Error(`图书馆预约系统返回 HTTP ${res.status}。`);
@@ -86,32 +199,7 @@ export async function librarySeats(opts: { date?: string } = {}): Promise<Librar
     throw new Error(`图书馆预约系统报错：${json.message ?? `code=${String(json.code)}`}`);
   }
 
-  const dates = Array.isArray(json.data.date) ? json.data.date.map(String) : [];
-  const picked = date || dates[0] || '';
-  const premises = (json.data.list ?? []).map((p) => {
-    const floors = Array.isArray(p.children)
-      ? p.children.map((c) => ({
-          id: String(c.id ?? ''),
-          name: String(c.name ?? ''),
-          total: num(c.total_num),
-          free: num(c.free_num),
-        }))
-      : [];
-    return {
-      id: String(p.id ?? ''),
-      name: String(p.name ?? ''),
-      total: num(p.total_num),
-      free: num(p.free_num),
-      ...(floors.length ? { floors } : {}),
-    };
-  });
-
-  return {
-    date: picked,
-    dates,
-    premises,
-    url: librarySeatUrl(premises[0]?.id ?? '1', picked),
-  };
+  return parseTopFor(json.data, date);
 }
 
 /* ------------------------------------------------------------------ */

@@ -64,6 +64,17 @@ async function pageToken(tabId: number): Promise<string> {
 }
 
 /** 后台直接打图书馆接口（host_permissions 已含该域，SW 的 fetch 不受页面 CORS 限制） */
+/** 把服务端返回浓缩成一行诊断：code / message / list 条数 / 是否含 day。 */
+function describePayload(raw: unknown): string {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const data = (o.data ?? {}) as Record<string, unknown>;
+  const list = (data.list ?? data.seats ?? []) as unknown[];
+  const code = o.code ?? o.status ?? "?";
+  const msg = typeof o.message === "string" ? o.message : typeof o.msg === "string" ? o.msg : "";
+  const keys = Object.keys(data).slice(0, 6).join(",");
+  return `code=${String(code)} msg=${msg || "-"} list=${Array.isArray(list) ? list.length : "非数组"} keys=${keys || "-"}`;
+}
+
 async function fetchSeatsDirect(areaId: string, day: string, token: string): Promise<unknown> {
   const res = await fetch('http://order.lib.zzu.edu.cn/v4/Space/seat', {
     method: 'POST',
@@ -85,6 +96,44 @@ async function fetchSeatsDirect(areaId: string, day: string, token: string): Pro
   return res.json();
 }
 
+interface LibBridge {
+  libSeats?: (areaId: string, date: string, reqId: string) => void;
+  loginLibrary?: () => void;
+}
+
+interface LibWindow {
+  CampusNotify?: LibBridge;
+  __libSeats?: (reqId: string, json: string) => void;
+  __libSeatWaiters?: Record<string, (json: string) => void>;
+}
+
+/** 安卓壳原生桥：CampusNotify.libSeats(areaId, date, reqId) → window.__libSeats(reqId, json)。 */
+function bridgeNativeSeats(areaId: string, date: string): Promise<string> | null {
+  const w = (typeof window === 'undefined' ? undefined : window) as LibWindow | undefined;
+  const bridge = w?.CampusNotify;
+  if (!w || !bridge || typeof bridge.libSeats !== 'function') return null;
+  const reqId = 'lib' + Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
+  w.__libSeatWaiters = w.__libSeatWaiters ?? {};
+  w.__libSeats = (id: string, json: string) => {
+    const fn = w.__libSeatWaiters?.[id];
+    if (fn) {
+      delete w.__libSeatWaiters![id];
+      fn(json);
+    }
+  };
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      delete w.__libSeatWaiters![reqId];
+      reject(new Error('图书馆接口超时（20 秒没回）'));
+    }, 20_000);
+    w.__libSeatWaiters![reqId] = (json: string) => {
+      clearTimeout(timer);
+      resolve(json);
+    };
+    bridge.libSeats!(areaId, date, reqId);
+  });
+}
+
 export async function readLibrarySeats(args: {
   areaId: string;
   date: string;
@@ -94,14 +143,49 @@ export async function readLibrarySeats(args: {
     areaId: string;
     tried: string[];
     raw?: unknown;
+    diag?: string;
   }>
 > {
+  // 安卓壳：走原生桥（原生 HTTP 不受 CORS / 混合内容限制）
+  const bridged = bridgeNativeSeats(args.areaId, args.date);
+  if (bridged) {
+    const json = await bridged;
+    let outer: { ok?: boolean; error?: string; raw?: unknown };
+    try {
+      outer = JSON.parse(json) as { ok?: boolean; error?: string; raw?: unknown };
+    } catch {
+      return { ok: false, error: '原生桥返回的不是 JSON' };
+    }
+    if (!outer.ok) return { ok: false, error: outer.error ?? '图书馆接口失败' };
+
+    // 服务端把「被别处顶掉」也放在 200 里（code=10001），必须翻成人话
+    const raw = (outer.raw ?? {}) as { code?: number | string; message?: string };
+    if (String(raw.code) === '10001') {
+      const msg = String(raw.message ?? '');
+      const kicked = /其他设备|其他终端|已在别处|已从其他/.test(msg);
+      return {
+        ok: false,
+        error: kicked
+          ? '图书馆只允许一台设备在线：刚才在手机或电脑上登录过，这里被顶掉了。点「登录图书馆」重登一次就好。'
+          : `图书馆要重新登录（${msg || '未登录'}）：点菜单里的「登录图书馆」。`,
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        seats: parseSeatMap(outer.raw).seats,
+        areaId: args.areaId,
+        tried: [args.areaId],
+        diag: describePayload(outer.raw),
+      },
+    };
+  }
   const tab = await findLibraryTab();
   if (!tab?.id) {
     return {
       ok: false,
       error:
-        '要先在浏览器里打开并登录图书馆空间预约（http://order.lib.zzu.edu.cn/h5/index.html#/seat/index）。那个站的登录态不在我校内 token 里，我读不到。',
+        '图书馆座位图要用那个站自己的登录态，我这边拿不到。三步就能解决：\n1. 点下面「打开座位预约」进那个网站并登录（学校账号）\n2. 登录后回到这里，再说一次「一楼座位图」\n3. 如果你是在手机上（没有装浏览器扩展），那个页面请用系统浏览器打开登录，回来我仍然读不到——手机上只能看馆级余量，座位号需要电脑上的扩展。',
     };
   }
 

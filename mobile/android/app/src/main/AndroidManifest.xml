@@ -16,7 +16,16 @@
     android:usesCleartextTraffic="true"
     android:theme="@android:style/Theme.Material.NoActionBar">
 
-    <activity
+        <activity
+            android:name=".LibBookActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+        <activity
+            android:name=".LibLoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
       android:name=".MainActivity"
       android:exported="true"
       android:configChanges="orientation|screenSize|keyboardHidden">

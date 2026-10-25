@@ -29,6 +29,9 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
+    private static final int REQ_LIB_LOGIN = 3002;
+    private static final int REQ_LIB_BOOK = 3003;
+    private String PENDING_BOOK_REQ = null;
     private static final int REQ_LOGIN = 3001;
 
     private WebView web;
@@ -76,6 +79,70 @@ public class MainActivity extends Activity {
     /** 网页 → 壳：一批课前提醒（{at,title,body} 的数组）。JS 接口在各线程回调，切回主线程。 */
     private class NotifyBridge {
         /** 页面 → 壳：立刻弹一条系统通知（有新通知时用）。 */
+        /** 图书馆馆级余量（免登录）。 */
+        @android.webkit.JavascriptInterface
+        public void libTopFor(final String areaId, final String date, final String reqId) {
+            web.post(new Runnable() {
+                @Override public void run() {
+            LibSeatClient.fetchTopAsync(web, MainActivity.this, areaId, date, reqId);
+        
+                }
+            });
+        }
+
+        /** 是否已抓过图书馆票据。 */
+        @android.webkit.JavascriptInterface
+        public boolean libLoggedIn() {
+            return LibSeatClient.hasToken(MainActivity.this);
+        }
+
+        /** 直接打开图书馆登录页。 */
+        @android.webkit.JavascriptInterface
+        public void loginLibrary() {
+            runOnUiThread(new Runnable() {
+                @Override public void run() { openLibraryLogin(); }
+            });
+        }
+
+        /** 长按确认后真正下单：交给 LibBookActivity，由页面自己发 confirm（含 AES）。 */
+        @JavascriptInterface
+        public void bookSeat(final String areaId, final String date, final String seatNo, final String reqId) {
+            web.post(new Runnable() {
+                @Override public void run() {
+                    if (!LibSeatClient.hasToken(MainActivity.this)) {
+                        LibSeatClient.reply(web, reqId, false, "还没登录图书馆：先点菜单里的「登录图书馆」登录一次");
+                        openLibraryLogin();
+                        return;
+                    }
+                    PENDING_BOOK_REQ = reqId;
+                    Intent it = new Intent(MainActivity.this, LibBookActivity.class);
+                    it.putExtra("areaId", areaId);
+                    it.putExtra("date", date);
+                    it.putExtra("seatNo", seatNo);
+                    startActivityForResult(it, REQ_LIB_BOOK);
+                }
+            });
+        }
+        /** 图书馆座位（只读）：有票据就原生直连取，没有就引导去登录。 */
+        @android.webkit.JavascriptInterface
+        public void libSeats(final String areaId, final String date, final String reqId) {
+            web.post(new Runnable() {
+                @Override public void run() {
+            if (!LibSeatClient.loggedIn(MainActivity.this)) {
+                String js = "window.__libSeats&&window.__libSeats("
+                        + org.json.JSONObject.quote(reqId) + ","
+                        + org.json.JSONObject.quote("{\"ok\":false,\"error\":\"还没登录图书馆：点右上角菜单里的「登录图书馆」，在打开的页面里用学号登录一次，回来再问\"}")
+                        + ")";
+                web.evaluateJavascript(js, null);
+                openLibraryLogin();
+                return;
+            }
+            LibSeatClient.fetchAsync(web, MainActivity.this, areaId, date, reqId);
+        
+                }
+            });
+        }
+
         @JavascriptInterface
         public void notify(String title, String body) {
             runOnUiThread(() -> ReminderReceiver.showNow(MainActivity.this, title, body));
@@ -167,6 +234,7 @@ public class MainActivity extends Activity {
         menu.add(0, 1, 0, "登录（推荐）");
         menu.add(0, 2, 1, "从剪贴板导入");
         menu.add(0, 4, 2, "用系统浏览器登录");
+        menu.add(0, 5, 2, "登录图书馆");
         menu.add(0, 3, 3, "刷新");
         return true;
     }
@@ -178,6 +246,7 @@ public class MainActivity extends Activity {
             case 4: openInBrowser(AppConfig.LOGIN_URL); return true;
             case 2: importFromClipboard(); return true;
             case 3: web.reload(); return true;
+            case 5: openLibraryLogin(); return true;
             default: return super.onOptionsItemSelected(item);
         }
     }
@@ -187,9 +256,32 @@ public class MainActivity extends Activity {
         startActivityForResult(new Intent(this, LoginActivity.class), REQ_LOGIN);
     }
 
+    private void openLibraryLogin() {
+        startActivityForResult(new Intent(this, LibLoginActivity.class), REQ_LIB_LOGIN);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_LIB_BOOK) {
+            String req = PENDING_BOOK_REQ;
+            PENDING_BOOK_REQ = null;
+            String payload = (data == null) ? null : data.getStringExtra("result");
+            if (resultCode == RESULT_OK && payload != null) {
+                LibSeatClient.deliverPublic(web, req, payload);
+                Toast.makeText(this, "已提交，请核对图书馆页面上的结果", Toast.LENGTH_LONG).show();
+            } else {
+                LibSeatClient.reply(web, req, false, "已取消，没有提交预约");
+            }
+            return;
+        }
+
+        if (requestCode == REQ_LIB_LOGIN) {
+            if (resultCode == RESULT_OK) {
+                Toast.makeText(this, "图书馆登录成功，之后可以直接问座位号", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != REQ_LOGIN || resultCode != RESULT_OK || data == null) {
             return;
         }

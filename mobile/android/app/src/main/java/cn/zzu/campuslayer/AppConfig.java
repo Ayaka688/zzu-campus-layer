@@ -17,9 +17,11 @@ final class AppConfig {
      * 落在这个静态文件上，登录成功后地址就是 ...css?ticket=<JWT>，壳能直接读出来。
      * 文件名里带构建 hash，学校重建后可能 404 —— 无所谓，我们要的是地址里的 ticket。
      */
+    static final String LIB_LOGIN_URL = "http://order.lib.zzu.edu.cn/h5/index.html#/seat/index";
+
     static final String LOGIN_URL =
             "https://cas.s.zzu.edu.cn/cas/login?service="
-            + "https%3A%2F%2Funiapp.s.zzu.edu.cn%2Fstatic%2Findex.a5c69d49.css";
+            + "https%3A%2F%2Funiapp.s.zzu.edu.cn%2Fpages%2Ftab%2Findex%2Findex";
 
     /** 备用入口：学校自带的树维登录页（万一 CAS 那边改了路由，还能从这里手动兜） */
     static final String LOGIN_URL_FALLBACK = "https://jwxt.zzu.edu.cn/uniapp/index.html";
