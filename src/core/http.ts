@@ -39,6 +39,26 @@ export function authHint(source: Source): string {
     : '门户登录态已失效，请重新打开 https://uniapp.s.zzu.edu.cn 登录一次';
 }
 
+/**
+ * 换个 token 再试一次的钩子。
+ *
+ * 门户票只有 8 小时、教务票 30 天，但两张都是同一个 CAS 签的。真实情况是：
+ * 门户票一过期，用户就得重新登一次——哪怕他手里那张 30 天的教务票还好好的。
+ * 所以这里留一个钩子：某个源判 `code:-1` 时，问一句「另一个源有没有能用的票」，
+ * 有就换上去重打一次。能不能用由服务端说了算，结果会缓存（见 storage.ts），
+ * 顶不上就记下来，别每次请求都白试两遍。
+ */
+export interface TokenSwap {
+  alt(source: Source, tried: string): Promise<string | undefined>;
+  verdict(source: Source, ok: boolean): Promise<void>;
+}
+
+let swap: TokenSwap | null = null;
+
+export function setTokenSwap(handler: TokenSwap | null): void {
+  swap = handler;
+}
+
 interface SendOptions {
   method?: 'GET' | 'POST';
   body?: unknown;
@@ -94,6 +114,31 @@ export function unwrap<T>(json: unknown, source: Source = 'jwxt'): T {
 }
 
 export async function send<T>(url: string, opts: SendOptions): Promise<T> {
+  const attempt = (token: string): Promise<T> => sendOnce<T>(url, { ...opts, token });
+  try {
+    return await attempt(opts.token);
+  } catch (e) {
+    if (!(e instanceof ApiError) || !e.isAuth || !swap) throw e;
+    let alt: string | undefined;
+    try {
+      alt = await swap.alt(opts.source, opts.token);
+    } catch {
+      alt = undefined;
+    }
+    if (!alt) throw e;
+    try {
+      const out = await attempt(alt);
+      void swap.verdict(opts.source, true).catch(() => undefined);
+      return out;
+    } catch (e2) {
+      void swap.verdict(opts.source, false).catch(() => undefined);
+      // 换票也没用的话，报原来的那句（「门户登录态已失效…」），别暴露实现细节
+      throw e;
+    }
+  }
+}
+
+async function sendOnce<T>(url: string, opts: SendOptions): Promise<T> {
   const method = opts.method ?? 'GET';
   const json = method === 'POST' && opts.body !== undefined && !opts.form;
   const init: RequestInit = {

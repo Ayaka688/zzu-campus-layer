@@ -7,7 +7,7 @@ import { planStudy, renderStudyPlan } from './study';
 import { seatMapDataUri } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
-import { addDays, todayShanghai, weekdayOf } from './util';
+import { addDays, dateOfWeek, todayShanghai, weekOfDate, weekdayOf } from './util';
 import { buildCards, cardId, cardLine, filterCards, renderCards, sortCards, toPlainText, todayDigest } from './notice';
 import { CATEGORY_LABEL, expandNoticeQuery as expandQuery } from './noticeRules';
 
@@ -32,11 +32,58 @@ export interface ToolDefinition<A> {
 const dayArg = z.union([z.literal('today'), z.literal('tomorrow'), z.number().int().min(1).max(7)]).optional();
 const periodArg = z.union([z.literal('morning'), z.literal('afternoon'), z.literal('evening')]).optional();
 
-function resolveDay(day: 'today' | 'tomorrow' | number | undefined, today: string): { weekday: number; date: string } {
-  if (day === undefined) return { weekday: 0, date: today };
-  if (typeof day === 'number') return { weekday: day, date: today };
+function resolveDay(day: 'today' | 'tomorrow' | number | undefined, today: string): { weekday: number; date: string; dated: boolean } {
+  if (day === undefined) return { weekday: 0, date: today, dated: false };
+  // 数字只是星期几，落不到具体某一天，所以不能拿它去推周次
+  if (typeof day === 'number') return { weekday: day, date: today, dated: false };
   const date = day === 'tomorrow' ? addDays(today, 1) : today;
-  return { weekday: weekdayOf(date), date };
+  return { weekday: weekdayOf(date), date, dated: true };
+}
+
+/** 一节课表查询最终落在「第几周、星期几、哪一天」。 */
+export interface ScheduleWindow {
+  /** 教学周次；没算出来时 undefined（渲染时就不按周过滤） */
+  week?: number;
+  weekday: number;
+  /** 能确定具体日期才给，界面上带日期更好读 */
+  date?: string;
+  /** 目标日期落在学期教学周之外（假期/开学前） */
+  outOfTerm: boolean;
+}
+
+/**
+ * 周次要跟着**目标日期**走，不是跟着「今天第几周」走。
+ * 例如周日问「明天有课吗」，明天已经是下一周，拿本周周次筛就会筛错，
+ * 标题写「第 7 周」却列着第 8 周的日期——这正是课表与实际不符的根源。
+ */
+export function resolveScheduleWindow(
+  args: { week?: number; weekOffset?: number; day?: 'today' | 'tomorrow' | number },
+  term: { startDate: string; currentWeek?: number; weeks: number[] },
+  today: string,
+): ScheduleWindow {
+  const { weekday, date, dated } = resolveDay(args.day, today);
+  const current = term.currentWeek && term.currentWeek > 0 ? term.currentWeek : weekOfDate(term.startDate, today);
+  let week: number;
+  if (typeof args.week === 'number' && args.week > 0) {
+    week = args.week;
+  } else if (typeof args.weekOffset === 'number' && args.weekOffset !== 0) {
+    week = current + args.weekOffset;
+  } else if (dated) {
+    week = weekOfDate(term.startDate, date);
+  } else {
+    week = current;
+  }
+  const last = term.weeks.length ? Math.max(...term.weeks) : Math.max(current, 1);
+  const outOfTerm = week < 1 || week > last;
+  // 只在「日期确实落在这一周」时才把日期显示出来，避免又出现日期与周次对不上
+  const shownDate = dated && weekOfDate(term.startDate, date) === week ? date : undefined;
+  const day = shownDate ?? (weekday && !outOfTerm ? dateOfWeek(term.startDate, week, weekday) : undefined);
+  return {
+    week,
+    weekday,
+    ...(day ? { date: day } : {}),
+    outOfTerm,
+  };
 }
 
 /** 上午 1-4 节 / 下午 5-8 节 / 晚上 9-10 节，按开始时间判。 */
@@ -56,6 +103,7 @@ const PERIOD_LABEL: Record<'morning' | 'afternoon' | 'evening', string> = {
 
 export const getSchedule: ToolDefinition<{
   week?: number;
+  weekOffset?: number;
   day?: 'today' | 'tomorrow' | number;
   period?: 'morning' | 'afternoon' | 'evening';
 }> = {
@@ -63,31 +111,44 @@ export const getSchedule: ToolDefinition<{
   description: '查询课表：默认当前教学周，可按周次、按天、按时段（上午/下午/晚上）过滤。',
   schema: z.object({
     week: z.number().int().min(0).max(30).optional(),
+    /** 相对周次：0=本周、1=下周、-1=上周。比让模型自己算周号可靠。 */
+    weekOffset: z.number().int().min(-4).max(4).optional(),
     day: dayArg,
     period: periodArg,
   }),
   async run(args, svc) {
     const term = await svc.term();
-    const week = args.week === undefined ? term.currentWeek || undefined : args.week || undefined;
-    let courses = await svc.courses();
     const today = todayShanghai();
-    const { weekday, date } = resolveDay(args.day, today);
+    const window = resolveScheduleWindow(args, term, today);
+    const week = window.week;
+    let courses = await svc.courses();
+    const { weekday } = window;
     if (weekday) courses = courses.filter((c) => c.weekday === weekday);
+    // 周次在这里就筛掉，count / data.courses 才不会把别的周的课算进来
+    if (week) courses = courses.filter((c) => c.weeks.length === 0 || c.weeks.includes(week));
     if (args.period) courses = courses.filter((c) => inPeriod(c.startTime, args.period!));
     const text = renderCourseTable(courses, { term, ...(week ? { week } : {}) });
     // 指定了「某天 / 某时段」却一条都没有时，别直接甩「课表为空」，
     // 要说清楚是那个时段没课——否则用户以为查错了。
     const label = args.period ? PERIOD_LABEL[args.period] : '';
-    const head = weekday ? `${date}${label ? ` ${label}` : ''}` : label ? `本${label}` : '';
-    const empty = courses.length === 0 && (weekday > 0 || Boolean(args.period));
-    const body = empty ? `${head ? `${head} · ` : ''}没有课。` : head ? `${head} · ${text}` : text;
+    const dayLabel = window.date ?? '';
+    const head = dayLabel ? `${dayLabel}${label ? ` ${label}` : ''}` : label ? `本${label}` : '';
+    const empty = courses.length === 0 && (weekday > 0 || Boolean(args.period) || Boolean(window.outOfTerm));
+    const body = window.outOfTerm
+      ? `${head ? `${head} · ` : ''}不在本学期教学周内（第 1–${Math.max(...term.weeks, 1)} 周），那天没有课。`
+      : empty
+        ? `${head ? `${head} · ` : ''}没有课。`
+        : head
+          ? `${head} · ${text}`
+          : text;
     return {
       text: body,
       data: {
         count: courses.length,
         week: week ?? null,
         ...(args.period ? { period: args.period } : {}),
-        ...(weekday ? { date } : {}),
+        ...(dayLabel ? { date: dayLabel } : {}),
+        ...(window.outOfTerm ? { outOfTerm: true } : {}),
         courses,
       },
     };

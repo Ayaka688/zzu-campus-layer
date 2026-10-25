@@ -79,7 +79,13 @@ export const TOOL_SPECS: ToolSpec[] = [
       parameters: {
         type: 'object',
         properties: {
-          week: { type: 'integer', minimum: 1, maximum: 30, description: '教学周次；不填=当前周' },
+          week: { type: 'integer', minimum: 1, maximum: 30, description: '教学周次（绝对）；不填=当前周' },
+          weekOffset: {
+            type: 'integer',
+            minimum: -4,
+            maximum: 4,
+            description: '相对周次：0=本周、1=下周、-1=上周。用户说「下周/上周」时用它，不要自己算周号',
+          },
           day: DAY,
           period: PERIOD,
         },

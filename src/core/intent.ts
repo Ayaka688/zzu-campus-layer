@@ -64,6 +64,8 @@ export function extractPeriod(text: string): Period | undefined {
 export function relativeDayOffset(text: string): number | undefined {
   if (/大后天/.test(text)) return 3;
   if (/后天/.test(text)) return 2;
+  if (/明早|明儿早|明晚|明儿晚/.test(text)) return 1;
+  if (/今早|今儿早|今晚|今儿晚/.test(text)) return 0;
   if (/明天|明日/.test(text)) return 1;
   if (/今天|今日|now/.test(text)) return 0;
   return undefined;
@@ -88,6 +90,18 @@ function extractDay(text: string, today?: string): DayArg | undefined {
 function extractWeek(text: string): number | undefined {
   const m = /第\s*(\d{1,2})\s*周/.exec(text);
   if (m?.[1]) return Number(m[1]);
+  return undefined;
+}
+
+/**
+ * 「下周 / 上周」这种相对周次：返回相对当前周 +1 / -1，交给工具去算具体周号。
+ * 让模型或正则自己数周号是错的根源——日期跨周时（周日晚问「明天」）必然算错。
+ */
+export function relativeWeekOffset(text: string): number | undefined {
+  if (/下下(个)?(周|星期|礼拜)/.test(text)) return 2;
+  if (/下(个)?(周|星期|礼拜)/.test(text)) return 1;
+  if (/上(个)?(周|星期|礼拜)/.test(text)) return -1;
+  if (/(这|本|当前)(个)?(周|星期|礼拜)/.test(text)) return 0;
   return undefined;
 }
 
@@ -172,6 +186,7 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     const sectionish = /第\s*\d|\d+\s*-\s*\d+\s*节/.test(s0);
     if (
       !sectionish &&
+      !/空教室|空着的教室/.test(s0) &&
       /自习|学习|看书|刷题|写作业|泡馆|安静.{0,4}(?:看|学)|找个地方.{0,4}(?:学|看)/.test(s0)
     ) {
     const needMinutes = extractNeedMinutes(s0) ?? 120;
@@ -206,7 +221,7 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
           reason: `关键词：座位图（${area.name}）`,
         };
       }
-      if (/座位|位置|空位|空座|还有位|有空|满|几楼|自习/.test(t0)) {
+      if (/座位|位置|空位|空座|几个?座|还剩?几|还有位|有空|满|几楼|自习|坐满|人多/.test(t0)) {
         return { tool: 'library_seats', args: d0 ? { date: d0 } : {}, reason: '关键词：图书馆座位余量' };
       }
     }
@@ -252,7 +267,7 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
 
   // 图书馆座位：问「还有位置吗」「空几个座」走实时余量；只说「预约座位」仍然走服务直达。
   // 放在空教室规则前面，否则「图书馆自习」会被当成「找空教室」。
-  if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|还有位|有空|满|几楼|自习|地图|座位图|平面图|哪些|空着/.test(t)) {
+  if (/图书馆|阅览室/.test(t) && /座位|位置|空位|空座|几个?座|还剩?几|还有位|有空|满|几楼|自习|坐满|人多|地图|座位图|平面图|哪些|空着/.test(t)) {
     const date = extractDate(t, today);
     const area = extractLibraryArea(t);
     // 只要提到「订/约/抢」就说明想下单；带座位号直接进下单准备，否则先看座位图
@@ -380,12 +395,15 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     return { tool: 'find_notices', args, reason: '关键词：通知/公告' };
   }
 
-  if (/课表|有课|上课|课程|几节课|[周星期礼拜][一二三四五六日天1-7].*课|明天.*课|今天.*课/.test(t)) {
+  if (/课表|有课|上课|课程|几节课|[周星期礼拜][一二三四五六日天1-7].*课|明天.*课|今天.*课|(?:下周|上周|这周|本周).{0,8}课/.test(t)) {
     const week = extractWeek(t);
+    const weekOffset = relativeWeekOffset(t);
     const day = extractDay(t, today);
     const period = extractPeriod(t);
     const args: Record<string, unknown> = {};
+    // 「第 8 周」是硬定死的周次；「下周」交给工具按当前周 +1 算，别在这里猜。
     if (week !== undefined) args.week = week;
+    else if (weekOffset !== undefined) args.weekOffset = weekOffset;
     if (day !== undefined) args.day = day;
     if (period) args.period = period;
     return { tool: 'get_schedule', args, reason: '关键词：课表' };

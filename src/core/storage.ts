@@ -9,6 +9,7 @@
 import type { CampusSession } from './services';
 import { tokenMeta } from './jwt';
 import { getKV, encodeBundle, type TokenBundle } from './kv';
+import { setTokenSwap } from './http';
 
 export type TokenSource = 'portal' | 'jwxt';
 
@@ -216,6 +217,36 @@ const WATCH_KEY = 'watch';
 export async function getWatchState(): Promise<WatchState> {
   return (await getKV().get<WatchState>(WATCH_KEY)) ?? {};
 }
+
+// ---- 两张票互相当备份 ----
+// 门户票 8 小时、教务票 30 天，但都是 cas.s.zzu.edu.cn 签的。门户票过期时先拿教务票顶上，
+// 用户就不用天天重登。能不能顶由服务端决定，结论缓存 6 小时，免得每次请求都白试一遍。
+
+const SWAP_KEY = 'tokenSwap';
+const SWAP_TTL = 6 * 3_600_000;
+
+interface SwapState {
+  verdict?: 'ok' | 'no';
+  at?: number;
+  source?: TokenSource;
+}
+
+export async function altToken(source: TokenSource, tried: string): Promise<string | undefined> {
+  const state = (await getKV().get<SwapState>(SWAP_KEY)) ?? {};
+  if (state.verdict === 'no' && typeof state.at === 'number' && Date.now() - state.at < SWAP_TTL) return undefined;
+  const store = await readStore();
+  const other: TokenSource = source === 'portal' ? 'jwxt' : 'portal';
+  const candidate = store[other]?.token;
+  if (!candidate || candidate === tried) return undefined;
+  if (!tokenMeta(candidate).valid) return undefined;
+  return candidate;
+}
+
+export async function noteSwapVerdict(source: TokenSource, ok: boolean): Promise<void> {
+  await getKV().set(SWAP_KEY, { verdict: ok ? 'ok' : 'no', at: Date.now(), source } satisfies SwapState);
+}
+
+setTokenSwap({ alt: altToken, verdict: noteSwapVerdict });
 
 export async function setWatchState(patch: Partial<WatchState>): Promise<WatchState> {
   const next = { ...(await getWatchState()), ...patch };
