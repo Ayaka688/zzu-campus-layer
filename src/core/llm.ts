@@ -41,7 +41,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     id: 'zhipu',
     label: '智谱 GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    model: 'glm-4-flash',
+    model: 'glm-4.7-flash',
     hint: '智谱的对话接口不允许浏览器跨域直连：手机 PWA 用不了，浏览器扩展里可以（扩展不受 CORS 限制）。',
   },
   {
@@ -120,7 +120,7 @@ export interface LlmSettings {
 }
 
 export const DEFAULT_LLM_SETTINGS: LlmSettings = {
-  enabled: false,
+  enabled: true,
   provider: DEFAULT_PROVIDER,
   apiKey: '',
   model: DEFAULT_MODEL,

@@ -71,7 +71,7 @@ function App() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [settings, setSettings] = useState<LlmSettings>({
-    enabled: false,
+    enabled: true,
     provider: 'school',
     apiKey: '',
     model: 'DeepSeek-R1',

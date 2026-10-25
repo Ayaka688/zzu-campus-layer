@@ -86,7 +86,7 @@ function App() {
   const [testing, setTesting] = useState(false);
   const [testNote, setTestNote] = useState('');
   const [llm, setLlm] = useState<LlmSettingsStored>({
-    enabled: false,
+    enabled: true,
     provider: 'school',
     apiKey: '',
     model: 'DeepSeek-R1',
