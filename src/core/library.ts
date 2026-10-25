@@ -54,7 +54,90 @@ export function librarySeatUrl(premiseId: string, date: string): string {
   return `${LIB_BASE}/h5/index.html#/seat/space?id=${encodeURIComponent(premiseId)}&date=${encodeURIComponent(date)}`;
 }
 
-export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
+interface LibTopBridge {
+  libTopFor?: (areaId: string, date: string, reqId: string) => void;
+  libLoggedIn?: () => boolean;
+  loginLibrary?: () => void;
+}
+
+interface LibTopWindow {
+  CampusNotify?: LibTopBridge;
+  __libSeats?: (reqId: string, json: string) => void;
+  __libSeatWaiters?: Record<string, (json: string) => void>;
+}
+
+function bridgeTopFor(date: string): Promise<string> | null {
+  const w = (typeof window === 'undefined' ? undefined : window) as LibTopWindow | undefined;
+  const bridge = w?.CampusNotify;
+  if (!w || !bridge || typeof bridge.libTopFor !== 'function') return null;
+  const reqId = 'top' + Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
+  w.__libSeatWaiters = w.__libSeatWaiters ?? {};
+  w.__libSeats = (id: string, json: string) => {
+    const fn = w.__libSeatWaiters?.[id];
+    if (fn) {
+      delete w.__libSeatWaiters![id];
+      fn(json);
+    }
+  };
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      delete w.__libSeatWaiters![reqId];
+      reject(new Error('图书馆接口超时（20 秒没回）'));
+    }, 20_000);
+    w.__libSeatWaiters![reqId] = (json: string) => {
+      clearTimeout(timer);
+      resolve(json);
+    };
+    bridge.libTopFor!('1', date, reqId);
+  });
+}
+
+export function parseTopFor(
+  data: { date?: string[]; list?: RawPremise[] },
+  date = '',
+): LibrarySeats {
+  const dates = Array.isArray(data.date) ? data.date.map(String) : [];
+  const picked = date || dates[0] || '';
+  const premises = (data.list ?? []).map((x) => {
+    const floors = Array.isArray(x.children)
+      ? x.children.map((c) => ({
+          id: String(c.id ?? ''),
+          name: String(c.name ?? ''),
+          total: num(c.total_num),
+          free: num(c.free_num),
+        }))
+      : [];
+    return {
+      id: String(x.id ?? ''),
+      name: String(x.name ?? ''),
+      total: num(x.total_num),
+      free: num(x.free_num),
+      ...(floors.length ? { floors } : {}),
+    };
+  });
+  return {
+    date: picked,
+    dates,
+    premises,
+    url: librarySeatUrl(premises[0]?.id ?? '1', picked),
+  };
+}
+
+export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {  const bridgedTop = bridgeTopFor(opts.date ?? '');
+  if (bridgedTop) {
+    const raw = await bridgedTop;
+    let outer: { ok?: boolean; error?: string; raw?: unknown };
+    try {
+      outer = JSON.parse(raw) as { ok?: boolean; error?: string; raw?: unknown };
+    } catch {
+      throw new Error('原生桥返回的不是 JSON');
+    }
+    if (!outer.ok) throw new Error(outer.error ?? '图书馆接口失败');
+    const data = (outer.raw as { data?: { date?: string[]; list?: RawPremise[] } }).data;
+    if (!data) throw new Error('图书馆接口没返回 data');
+    return parseTopFor(data, opts.date ?? '');
+  }
+
   const date = opts.date ?? '';
   let res: Response;
   try {
@@ -86,32 +169,7 @@ export async function librarySeats(opts: { date?: string } = {}): Promise<Librar
     throw new Error(`图书馆预约系统报错：${json.message ?? `code=${String(json.code)}`}`);
   }
 
-  const dates = Array.isArray(json.data.date) ? json.data.date.map(String) : [];
-  const picked = date || dates[0] || '';
-  const premises = (json.data.list ?? []).map((p) => {
-    const floors = Array.isArray(p.children)
-      ? p.children.map((c) => ({
-          id: String(c.id ?? ''),
-          name: String(c.name ?? ''),
-          total: num(c.total_num),
-          free: num(c.free_num),
-        }))
-      : [];
-    return {
-      id: String(p.id ?? ''),
-      name: String(p.name ?? ''),
-      total: num(p.total_num),
-      free: num(p.free_num),
-      ...(floors.length ? { floors } : {}),
-    };
-  });
-
-  return {
-    date: picked,
-    dates,
-    premises,
-    url: librarySeatUrl(premises[0]?.id ?? '1', picked),
-  };
+  return parseTopFor(json.data, date);
 }
 
 /* ------------------------------------------------------------------ */
