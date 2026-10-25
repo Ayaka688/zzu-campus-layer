@@ -30,6 +30,8 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
 
     private static final int REQ_LIB_LOGIN = 3002;
+    private static final int REQ_LIB_BOOK = 3003;
+    private String PENDING_BOOK_REQ = null;
     private static final int REQ_LOGIN = 3001;
 
     private WebView web;
@@ -96,7 +98,27 @@ public class MainActivity extends Activity {
 
         /** 直接打开图书馆登录页。 */
         @android.webkit.JavascriptInterface
-        public void loginLibrary() {
+        /** 长按确认后真正下单：交给 LibBookActivity，由页面自己发 confirm（含 AES）。 */
+    @JavascriptInterface
+    public void bookSeat(final String areaId, final String date, final String seatNo, final String reqId) {
+        web.post(new Runnable() {
+            @Override public void run() {
+                if (!LibSeatClient.hasToken(MainActivity.this)) {
+                    LibSeatClient.reply(web, reqId, false, "还没登录图书馆：先点菜单里的「登录图书馆」登录一次");
+                    openLibraryLogin();
+                    return;
+                }
+                PENDING_BOOK_REQ = reqId;
+                Intent it = new Intent(MainActivity.this, LibBookActivity.class);
+                it.putExtra("areaId", areaId);
+                it.putExtra("date", date);
+                it.putExtra("seatNo", seatNo);
+                startActivityForResult(it, REQ_LIB_BOOK);
+            }
+        });
+    }
+
+    public void loginLibrary() {
             runOnUiThread(new Runnable() {
                 @Override public void run() { openLibraryLogin(); }
             });
@@ -213,6 +235,7 @@ public class MainActivity extends Activity {
         menu.add(0, 2, 1, "从剪贴板导入");
         menu.add(0, 4, 2, "用系统浏览器登录");
         menu.add(0, 5, 2, "登录图书馆");
+        menu.add(0, 7, 3, "预约：在聊天里长按按钮");
         menu.add(0, 3, 3, "刷新");
         return true;
     }
@@ -241,6 +264,18 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_LIB_BOOK) {
+            String req = PENDING_BOOK_REQ;
+            PENDING_BOOK_REQ = null;
+            String payload = (data == null) ? null : data.getStringExtra("result");
+            if (resultCode == RESULT_OK && payload != null) {
+                LibSeatClient.deliverPublic(web, req, payload);
+                Toast.makeText(this, "已提交，请核对图书馆页面上的结果", Toast.LENGTH_LONG).show();
+            } else {
+                LibSeatClient.reply(web, req, false, "已取消，没有提交预约");
+            }
+            return;
+        }
         if (requestCode == REQ_LIB_LOGIN) {
             if (resultCode == RESULT_OK) {
                 Toast.makeText(this, "图书馆登录成功，之后可以直接问座位号", Toast.LENGTH_LONG).show();

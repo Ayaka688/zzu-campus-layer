@@ -201,6 +201,17 @@ final class LibSeatClient {
     }
 
     static boolean hasToken(Context ctx) { return loggedIn(ctx); }
+    static void deliverPublic(WebView web, String reqId, String json) { deliver(web, reqId, json); }
+
+    static void reply(WebView web, String reqId, boolean ok, String msg) {
+        deliver(web, reqId, "{\"ok\":" + ok + ",\"error\":" + q(msg) + "}");
+    }
+
+    private static String q(String v) {
+        if (v == null) return "null";
+        return "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
     private static void deliver(WebView web, String reqId, String json) {
         if (web == null || reqId == null || reqId.isEmpty()) return;
         String fn = "window.__libSeats&&window.__libSeats(" + JSONObject.quote(reqId) + "," + JSONObject.quote(json) + ")";
