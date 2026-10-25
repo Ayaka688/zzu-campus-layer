@@ -558,7 +558,19 @@ function App() {
                 <button class="primary" onClick={() => void shellLogin()}>
                   用学校账号登录
                 </button>
-                <a class="ghost" href={LIB_LOGIN} target="_blank" rel="noreferrer">
+                <a
+              class="ghost"
+              href={LIB_LOGIN}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => {
+                const b = (window as unknown as { CampusNotify?: { loginLibrary?: () => void } }).CampusNotify;
+                if (b?.loginLibrary) {
+                  e.preventDefault();
+                  b.loginLibrary();
+                }
+              }}
+            >
             登录图书馆
           </a>
           <button class="ghost" onClick={() => void readClip()}>
