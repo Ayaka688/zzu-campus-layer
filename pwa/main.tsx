@@ -61,6 +61,7 @@ const CAS_LOGIN =
   // 而静态文件不会启动那个 uni-app SPA —— SPA 一启动就会把 ?ticket= 从地址栏抹掉。
   encodeURIComponent('https://uniapp.s.zzu.edu.cn/static/index.a5c69d49.css');
 /* 门户的登录入口：同一个 CAS，只是 service 换成门户首页；拿到的票在门户/教务两边都能用。 */
+const LIB_LOGIN = 'http://order.lib.zzu.edu.cn/h5/index.html#/seat/index';
 const CAS_LOGIN_PORTAL =
   'https://cas.s.zzu.edu.cn/cas/login?service=' +
   encodeURIComponent('https://uniapp.s.zzu.edu.cn/pages/tab/index/index');
@@ -557,7 +558,10 @@ function App() {
                 <button class="primary" onClick={() => void shellLogin()}>
                   用学校账号登录
                 </button>
-                <button class="ghost" onClick={() => void readClip()}>
+                <a class="ghost" href={LIB_LOGIN} target="_blank" rel="noreferrer">
+            登录图书馆
+          </a>
+          <button class="ghost" onClick={() => void readClip()}>
                   从剪贴板导入
                 </button>
               </p>
