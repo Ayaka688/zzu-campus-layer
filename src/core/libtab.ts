@@ -143,6 +143,7 @@ export async function readLibrarySeats(args: {
     areaId: string;
     tried: string[];
     raw?: unknown;
+    diag?: string;
   }>
 > {
   // 安卓壳：走原生桥（原生 HTTP 不受 CORS / 混合内容限制）
