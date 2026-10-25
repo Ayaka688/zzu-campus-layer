@@ -81,6 +81,11 @@ public class MainActivity extends Activity {
         @android.webkit.JavascriptInterface
         public void libSeats(final String areaId, final String date, final String reqId) {
             if (!LibSeatClient.loggedIn(MainActivity.this)) {
+                String js = "window.__libSeats&&window.__libSeats("
+                        + org.json.JSONObject.quote(reqId) + ","
+                        + org.json.JSONObject.quote("{\"ok\":false,\"error\":\"还没登录图书馆：点右上角菜单里的「登录图书馆」，在打开的页面里用学号登录一次，回来再问\"}")
+                        + ")";
+                web.evaluateJavascript(js, null);
                 openLibraryLogin();
                 return;
             }
