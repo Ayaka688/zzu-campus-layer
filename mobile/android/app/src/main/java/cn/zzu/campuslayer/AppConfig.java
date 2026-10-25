@@ -21,7 +21,7 @@ final class AppConfig {
 
     static final String LOGIN_URL =
             "https://cas.s.zzu.edu.cn/cas/login?service="
-            + "https%3A%2F%2Funiapp.s.zzu.edu.cn%2Fstatic%2Findex.a5c69d49.css";
+            + "https%3A%2F%2Funiapp.s.zzu.edu.cn%2Fpages%2Ftab%2Findex%2Findex";
 
     /** 备用入口：学校自带的树维登录页（万一 CAS 那边改了路由，还能从这里手动兜） */
     static final String LOGIN_URL_FALLBACK = "https://jwxt.zzu.edu.cn/uniapp/index.html";
