@@ -208,7 +208,6 @@ public class MainActivity extends Activity {
         startActivityForResult(new Intent(this, LoginActivity.class), REQ_LOGIN);
     }
 
-    @Override
     private void openLibraryLogin() {
         startActivityForResult(new Intent(this, LibLoginActivity.class), REQ_LIB_LOGIN);
     }
