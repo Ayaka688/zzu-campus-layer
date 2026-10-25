@@ -82,7 +82,7 @@ function bridgeTopFor(date: string): Promise<string> | null {
   return new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
       delete w.__libSeatWaiters![reqId];
-      reject(new Error('图书馆接口超时（20 秒没回）'));
+      reject(new Error('[原生] 图书馆接口超时（20 秒没回）'));
     }, 20_000);
     w.__libSeatWaiters![reqId] = (json: string) => {
       clearTimeout(timer);
@@ -132,7 +132,7 @@ export async function librarySeats(opts: { date?: string } = {}): Promise<Librar
     } catch {
       throw new Error('原生桥返回的不是 JSON');
     }
-    if (!outer.ok) throw new Error(outer.error ?? '图书馆接口失败');
+    if (!outer.ok) throw new Error(`[原生] ${outer.error ?? '图书馆接口失败'}`);
     const data = (outer.raw as { data?: { date?: string[]; list?: RawPremise[] } }).data;
     if (!data) throw new Error('图书馆接口没返回 data');
     return parseTopFor(data, opts.date ?? '');
@@ -155,7 +155,7 @@ export async function librarySeats(opts: { date?: string } = {}): Promise<Librar
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`连不上图书馆预约系统（${msg}）。它只有校内网能访问，校外请先连 VPN。`);
+    throw new Error(`连不上图书馆预约系统（${msg}）【走的是网页直连，没用上原生桥】。它只在校内网能访问，校外先连 VPN；若你在安卓壳里看到这句，说明壳版本过旧或页面缓存没刷新。`);
   }
 
   if (!res.ok) throw new Error(`图书馆预约系统返回 HTTP ${res.status}。`);
