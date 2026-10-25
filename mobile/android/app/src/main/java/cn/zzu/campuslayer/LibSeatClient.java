@@ -139,6 +139,68 @@ final class LibSeatClient {
         return wrap.toString();
     }
 
+    /** 馆级余量（pcTopFor）：不需要登录票据。 */
+    static void fetchTopAsync(final WebView web, final Context ctx, final String areaId,
+                              final String date, final String reqId) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String payload;
+                try {
+                    payload = requestTop(areaId, date);
+                } catch (Throwable t) {
+                    JSONObject err = new JSONObject();
+                    try {
+                        err.put("ok", false);
+                        err.put("error", describe(t));
+                    } catch (Exception ignored) {}
+                    payload = err.toString();
+                }
+                final String out = payload;
+                new Handler(Looper.getMainLooper()).post(new Runnable() {
+                    @Override public void run() { deliver(web, reqId, out); }
+                });
+            }
+        }, "lib-top-fetch").start();
+    }
+
+    static String requestTop(String areaId, String date) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("id", areaId == null || areaId.isEmpty() ? "1" : areaId);
+        if (date != null && !date.isEmpty()) body.put("date", date);
+        HttpURLConnection conn = (HttpURLConnection) new URL(
+                "http://order.lib.zzu.edu.cn/v4/space/pcTopFor").openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(8000);
+        conn.setReadTimeout(12000);
+        conn.setDoOutput(true);
+        conn.setRequestProperty("content-type", "application/json");
+        conn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
+        byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+        conn.setFixedLengthStreamingMode(bytes.length);
+        try (OutputStream os = conn.getOutputStream()) { os.write(bytes); }
+        int code = conn.getResponseCode();
+        InputStream is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+        StringBuilder sb = new StringBuilder();
+        if (is != null) {
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
+            }
+        }
+        conn.disconnect();
+        if (code >= 400) {
+            JSONObject o = new JSONObject();
+            o.put("ok", false);
+            o.put("error", "图书馆接口 HTTP " + code);
+            return o.toString();
+        }
+        JSONObject wrap = new JSONObject();
+        wrap.put("ok", true);
+        wrap.put("raw", new JSONObject(sb.toString()));
+        return wrap.toString();
+    }
+
+    static boolean hasToken(Context ctx) { return loggedIn(ctx); }
     private static void deliver(WebView web, String reqId, String json) {
         if (web == null || reqId == null || reqId.isEmpty()) return;
         String fn = "window.__libSeats&&window.__libSeats(" + JSONObject.quote(reqId) + "," + JSONObject.quote(json) + ")";

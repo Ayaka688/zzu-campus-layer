@@ -77,6 +77,25 @@ public class MainActivity extends Activity {
     /** 网页 → 壳：一批课前提醒（{at,title,body} 的数组）。JS 接口在各线程回调，切回主线程。 */
     private class NotifyBridge {
         /** 页面 → 壳：立刻弹一条系统通知（有新通知时用）。 */
+        /** 图书馆馆级余量（免登录）。 */
+        @android.webkit.JavascriptInterface
+        public void libTopFor(final String areaId, final String date, final String reqId) {
+            LibSeatClient.fetchTopAsync(web, MainActivity.this, areaId, date, reqId);
+        }
+
+        /** 是否已抓过图书馆票据。 */
+        @android.webkit.JavascriptInterface
+        public boolean libLoggedIn() {
+            return LibSeatClient.hasToken(MainActivity.this);
+        }
+
+        /** 直接打开图书馆登录页。 */
+        @android.webkit.JavascriptInterface
+        public void loginLibrary() {
+            runOnUiThread(new Runnable() {
+                @Override public void run() { openLibraryLogin(); }
+            });
+        }
         /** 图书馆座位（只读）：有票据就原生直连取，没有就引导去登录。 */
         @android.webkit.JavascriptInterface
         public void libSeats(final String areaId, final String date, final String reqId) {
@@ -90,14 +109,6 @@ public class MainActivity extends Activity {
                 return;
             }
             LibSeatClient.fetchAsync(web, MainActivity.this, areaId, date, reqId);
-        }
-
-        /** 打开壳内图书馆登录页。 */
-        @android.webkit.JavascriptInterface
-        public void loginLibrary() {
-            runOnUiThread(new Runnable() {
-                @Override public void run() { openLibraryLogin(); }
-            });
         }
 
         @JavascriptInterface
