@@ -29,6 +29,7 @@ import android.widget.Toast;
  */
 public class MainActivity extends Activity {
 
+    private static final int REQ_LIB_LOGIN = 3002;
     private static final int REQ_LOGIN = 3001;
 
     private WebView web;
@@ -76,6 +77,24 @@ public class MainActivity extends Activity {
     /** 网页 → 壳：一批课前提醒（{at,title,body} 的数组）。JS 接口在各线程回调，切回主线程。 */
     private class NotifyBridge {
         /** 页面 → 壳：立刻弹一条系统通知（有新通知时用）。 */
+        /** 图书馆座位（只读）：有票据就原生直连取，没有就引导去登录。 */
+        @android.webkit.JavascriptInterface
+        public void libSeats(final String areaId, final String date, final String reqId) {
+            if (!LibSeatClient.loggedIn(MainActivity.this)) {
+                openLibraryLogin();
+                return;
+            }
+            LibSeatClient.fetchAsync(web, MainActivity.this, areaId, date, reqId);
+        }
+
+        /** 打开壳内图书馆登录页。 */
+        @android.webkit.JavascriptInterface
+        public void loginLibrary() {
+            runOnUiThread(new Runnable() {
+                @Override public void run() { openLibraryLogin(); }
+            });
+        }
+
         @JavascriptInterface
         public void notify(String title, String body) {
             runOnUiThread(() -> ReminderReceiver.showNow(MainActivity.this, title, body));
@@ -167,6 +186,7 @@ public class MainActivity extends Activity {
         menu.add(0, 1, 0, "登录（推荐）");
         menu.add(0, 2, 1, "从剪贴板导入");
         menu.add(0, 4, 2, "用系统浏览器登录");
+        menu.add(0, 5, 2, "登录图书馆");
         menu.add(0, 3, 3, "刷新");
         return true;
     }
@@ -178,6 +198,7 @@ public class MainActivity extends Activity {
             case 4: openInBrowser(AppConfig.LOGIN_URL); return true;
             case 2: importFromClipboard(); return true;
             case 3: web.reload(); return true;
+            case 5: openLibraryLogin(); return true;
             default: return super.onOptionsItemSelected(item);
         }
     }
@@ -188,8 +209,19 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    private void openLibraryLogin() {
+        startActivityForResult(new Intent(this, LibLoginActivity.class), REQ_LIB_LOGIN);
+    }
+
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_LIB_LOGIN) {
+            if (resultCode == RESULT_OK) {
+                Toast.makeText(this, "图书馆登录成功，之后可以直接问座位号", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != REQ_LOGIN || resultCode != RESULT_OK || data == null) {
             return;
         }

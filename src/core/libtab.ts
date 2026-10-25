@@ -85,6 +85,44 @@ async function fetchSeatsDirect(areaId: string, day: string, token: string): Pro
   return res.json();
 }
 
+interface LibBridge {
+  libSeats?: (areaId: string, date: string, reqId: string) => void;
+  loginLibrary?: () => void;
+}
+
+interface LibWindow {
+  CampusNotify?: LibBridge;
+  __libSeats?: (reqId: string, json: string) => void;
+  __libSeatWaiters?: Record<string, (json: string) => void>;
+}
+
+/** 安卓壳原生桥：CampusNotify.libSeats(areaId, date, reqId) → window.__libSeats(reqId, json)。 */
+function bridgeNativeSeats(areaId: string, date: string): Promise<string> | null {
+  const w = (typeof window === 'undefined' ? undefined : window) as LibWindow | undefined;
+  const bridge = w?.CampusNotify;
+  if (!w || !bridge || typeof bridge.libSeats !== 'function') return null;
+  const reqId = 'lib' + Date.now().toString(36) + Math.floor(Math.random() * 1e5).toString(36);
+  w.__libSeatWaiters = w.__libSeatWaiters ?? {};
+  w.__libSeats = (id: string, json: string) => {
+    const fn = w.__libSeatWaiters?.[id];
+    if (fn) {
+      delete w.__libSeatWaiters![id];
+      fn(json);
+    }
+  };
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      delete w.__libSeatWaiters![reqId];
+      reject(new Error('图书馆接口超时（20 秒没回）'));
+    }, 20_000);
+    w.__libSeatWaiters![reqId] = (json: string) => {
+      clearTimeout(timer);
+      resolve(json);
+    };
+    bridge.libSeats!(areaId, date, reqId);
+  });
+}
+
 export async function readLibrarySeats(args: {
   areaId: string;
   date: string;
@@ -96,6 +134,22 @@ export async function readLibrarySeats(args: {
     raw?: unknown;
   }>
 > {
+  // 安卓壳：走原生桥（原生 HTTP 不受 CORS / 混合内容限制）
+  const bridged = bridgeNativeSeats(args.areaId, args.date);
+  if (bridged) {
+    const json = await bridged;
+    let outer: { ok?: boolean; error?: string; raw?: unknown };
+    try {
+      outer = JSON.parse(json) as { ok?: boolean; error?: string; raw?: unknown };
+    } catch {
+      return { ok: false, error: '原生桥返回的不是 JSON' };
+    }
+    if (!outer.ok) return { ok: false, error: outer.error ?? '图书馆接口失败' };
+    return {
+      ok: true,
+      data: { seats: parseSeatMap(outer.raw).seats, areaId: args.areaId, tried: [args.areaId] },
+    };
+  }
   const tab = await findLibraryTab();
   if (!tab?.id) {
     return {
