@@ -159,6 +159,23 @@ const FLOOR_OF_LEGACY_ID: Record<string, string> = {
   '6': '四楼', '53': '四楼',
 };
 
+/**
+ * 把模型/规则可能给的各种写法都归一到楼层名：
+ * 旧 area id（3）、中文楼层（"一楼"/"1楼"/"一层"/"大厅"）、
+ * 误传成馆 id 的（1/10/60/70 → 按一楼处理）。
+ */
+function floorFromAreaId(areaId: string): string {
+  const hit = FLOOR_OF_LEGACY_ID[areaId];
+  if (hit) return hit;
+  const raw = String(areaId ?? '').trim();
+  if (/一楼|1\s*楼|一层|大厅/.test(raw)) return '一楼';
+  if (/二楼|2\s*楼|二层/.test(raw)) return '二楼';
+  if (/三楼|3\s*楼|三层/.test(raw)) return '三楼';
+  if (/四楼|4\s*楼|四层/.test(raw)) return '四楼';
+  if (['1', '10', '60', '70'].includes(raw)) return '一楼';
+  return '';
+}
+
 type FloorMap = { at: number; floors: Record<string, string> };
 let _floorCache: FloorMap | null = null;
 
@@ -167,7 +184,7 @@ let _floorCache: FloorMap | null = null;
  * 失败时原样返回传入的 id，保持旧行为。
  */
 export async function resolveLibraryArea(areaId: string, premiseId = '1'): Promise<string> {
-  const floor = FLOOR_OF_LEGACY_ID[areaId];
+  const floor = floorFromAreaId(areaId);
   if (!floor) return areaId;
   if (_floorCache && Date.now() - _floorCache.at < 5 * 60 * 1000 && _floorCache.floors[floor]) {
     return _floorCache.floors[floor] as string;
