@@ -11,6 +11,9 @@
  * 只支持 http（443 拒绝连接），且仅校内网可达——校外用户会拿到明确的错误文案。
  */
 
+import { send } from './http';
+import { todayShanghai } from './util';
+
 export const LIB_BASE = 'http://order.lib.zzu.edu.cn';
 
 export interface LibraryPremise {
@@ -123,7 +126,34 @@ export function parseTopFor(
   };
 }
 
-export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {  const bridgedTop = bridgeTopFor(opts.date ?? '');
+
+/**
+ * 从图书馆服务端读「它接受哪两天」，并把调用方给的日期夹进这个范围。
+ * 原因：该接口只接受今天/明天，其它日期一律回 code:0 + 空列表（不是报错），
+ * 一旦某台设备的本地日期算偏一天，就会稳定读不到座位。
+ */
+export async function resolveLibraryDate(date?: string): Promise<{ date: string; dates: string[]; adjusted: boolean }> {
+  let dates: string[] = [];
+  try {
+    const res = await send<{ data?: { date?: string[] } }>(
+      LIB_BASE + '/v4/space/index',
+      { method: 'POST', body: JSON.stringify({ id: '1' }), token: '', source: 'portal' },
+    );
+    const list = res?.data?.date;
+    if (Array.isArray(list)) dates = list.filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
+  } catch {
+    /* 读不到就退回调用方给的日期，别把功能卡死 */
+  }
+  const wanted = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '';
+  const fallback = todayShanghai() as string;
+  if (!dates.length) return { date: wanted || fallback, dates: [], adjusted: false };
+  if (wanted && dates.includes(wanted)) return { date: wanted, dates, adjusted: false };
+  return { date: dates[0] ?? fallback, dates, adjusted: Boolean(wanted) };
+}
+
+export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
+  const resolved = await resolveLibraryDate(opts.date);
+  opts = { ...opts, date: resolved.date };  const bridgedTop = bridgeTopFor(opts.date ?? '');
   if (bridgedTop) {
     const raw = await bridgedTop;
     let outer: { ok?: boolean; error?: string; raw?: unknown };
