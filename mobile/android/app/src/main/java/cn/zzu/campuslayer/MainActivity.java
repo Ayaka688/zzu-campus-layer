@@ -118,6 +118,8 @@ public class MainActivity extends Activity {
         });
     }
 
+    @JavascriptInterface
+
     public void loginLibrary() {
             runOnUiThread(new Runnable() {
                 @Override public void run() { openLibraryLogin(); }
