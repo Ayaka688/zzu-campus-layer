@@ -50,7 +50,7 @@ describe('agent 循环（支持 function calling 的模型）', () => {
       toolCall('c1', 'open_service', { keyword: '座位预约' }),
       answer('座位预约要从图书馆系统里选，我把入口放这儿了。'),
     ]);
-    const got = await ask('预约明天图书馆一楼随便一个位置', SESSION, { llm: AGENT_ON });
+    const got = await ask('随便问一句', SESSION, { llm: AGENT_ON });
 
     expect(got.via).toBe('agent');
     expect(got.steps).toEqual(['open_service']);

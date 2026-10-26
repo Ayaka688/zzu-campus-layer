@@ -388,6 +388,24 @@ async function runClassic(
  * 中途模型挂了也会回落到规则层，并把原因带在 `llmError` 里。
  */
 export async function ask(text: string, session: CampusSession, opts: AskOptions = {}): Promise<AskResult> {
+  // LIB_DETERMINISTIC：图书馆座位这类"参数必须精确"的请求，一律走规则层，
+  // 不让模型经手（实测模型会把楼层算成别的楼层的 areaId，导致取到错的房间）。
+  {
+    const libToday = todayShanghai();
+    const libIntent = parseIntent(text, libToday);
+    if (libIntent && /^(library_seats|library_seat_map|book_library_seat)$/.test(libIntent.tool)) {
+      const libSvc = new CampusService(session);
+      const libRun = await runTool(libIntent.tool, libIntent.args, libSvc);
+      return {
+        text: libRun.text,
+        tool: libIntent.tool,
+        data: libRun.data,
+        via: 'rule',
+        steps: [libIntent.tool],
+      };
+    }
+  }
+
   const cfg = opts.llm;
   const canUseTools = Boolean(cfg?.enabled && cfg.apiKey && resolveProvider(cfg.provider).supportsTools);
 
