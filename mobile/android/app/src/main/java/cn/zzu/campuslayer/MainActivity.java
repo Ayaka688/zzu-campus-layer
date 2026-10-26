@@ -336,7 +336,7 @@ public class MainActivity extends Activity {
 
         if (requestCode == REQ_LIB_LOGIN) {
             if (resultCode == RESULT_OK) {
-                Toast.makeText(this, "图书馆登录成功，正在取座位表…", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, pendingSeatReq != null ? "图书馆登录成功，正在取座位表…" : "图书馆登录成功。现在问「一楼座位图」就行", Toast.LENGTH_LONG).show();
             }
             final String pArea = pendingSeatArea;
             final String pDate = pendingSeatDate;
