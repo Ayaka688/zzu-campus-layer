@@ -1,5 +1,5 @@
 import { CampusService, CampusSession } from './services';
-import { helpText, parseIntent, relativeDayOffset, relativeWeekOffset, type Intent } from './intent';
+import { extractRoomName, helpText, parseIntent, relativeDayOffset, relativeWeekOffset, type Intent } from './intent';
 import {
   classifyIntentVerbose,
   llmChatWithTools,
@@ -107,6 +107,12 @@ export function applyTextHints(name: string, args: Record<string, unknown>, text
         delete out.weekOffset;
       }
     }
+  }
+  if (name === 'library_seat_map') {
+    // 模型常常漏掉房间名；用户话里带了就补上（只给楼层时不补，那是「列全部房间」）
+    const room = extractRoomName(text);
+    if (room) out.room = room;
+    else delete out.room;
   }
   return out;
 }

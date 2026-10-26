@@ -123,6 +123,22 @@ function extractLibraryArea(text: string): { id: string; name: string } | undefi
   return undefined;
 }
 
+/**
+ * 房间名：二层以上一层里有好几间自习室，用户会说「二楼 A 区座位图」。
+ * 只认带房间尾巴的说法（区/室/间/厅/自习室…），别把「图书馆二楼」当成房间。
+ */
+export function extractRoomName(text: string): string | undefined {
+  const cleaned = text
+    .replace(/座位图|平面图|地图|空位图|座位|位置|空位|空座|还有|哪些|哪个|哪间|有没有|空着|多少|吗|呢|的|啊/g, ' ')
+    .replace(/(一楼|1楼|一层|大厅|二楼|2楼|二层|三楼|3楼|三层|四楼|4楼|四层|图书馆)/g, ' ')
+    .replace(/[，,。.、!！?？]/g, ' ');
+  const m = /([A-Za-z]{0,2}\s*区|[\u4e00-\u9fa5A-Za-z0-9]{2,10}(?:自习室|阅览室|研习间|研讨室|讨论室|室|间|厅))/.exec(cleaned);
+  const name = m?.[1]?.replace(/\s+/g, ' ').trim();
+  if (!name) return undefined;
+  if (/^(房间|座位|楼层|这间|那间)$/.test(name)) return undefined;
+  return name;
+}
+
 /** 座位号：`001`、`A12`、`A-12` 这类；避免把「明天」里的数字当座位号 */
 function extractSeatNo(text: string): string | undefined {
   const m = /(?:座位?|号)?\s*([A-Za-z]{0,2}-?\d{2,4})(?!\d)/.exec(text);
@@ -187,6 +203,8 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     if (
       !sectionish &&
       !/空教室|空着的教室/.test(s0) &&
+      /* 说了「图书馆…自习室」是在问某个馆内房间，别当成找空教室自习 */
+      !/图书馆.{0,10}(?:自习室|阅览室|区|房间)/.test(s0) &&
       /自习|学习|看书|刷题|写作业|泡馆|安静.{0,4}(?:看|学)|找个地方.{0,4}(?:学|看)/.test(s0)
     ) {
     const needMinutes = extractNeedMinutes(s0) ?? 120;
@@ -215,10 +233,11 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
         };
       }
       if (area && /地图|座位图|平面图|哪些|空着|座位|位置|空位|空座/.test(t0)) {
+        const room0 = extractRoomName(t0);
         return {
           tool: 'library_seat_map',
-          args: { areaId: area.id, date: d0 ?? today },
-          reason: `关键词：座位图（${area.name}）`,
+          args: { areaId: area.id, date: d0 ?? today, ...(room0 ? { room: room0 } : {}) },
+          reason: `关键词：座位图（${area.name}${room0 ? ` ${room0}` : ''}）`,
         };
       }
       if (/座位|位置|空位|空座|几个?座|还剩?几|还有位|有空|满|几楼|自习|坐满|人多/.test(t0)) {
@@ -239,14 +258,15 @@ export function parseIntent(text: string, today = todayShanghai()): Intent | nul
     };
   }
 
-  // LIB_BY_FLOOR_ONLY：只给楼层 + 「地图/座位图/空着」也走座位图
-  if (/地图|座位图|平面图|哪些座位|空着/.test(t) && extractLibraryArea(t) && !/教室/.test(t)) {
+  // LIB_BY_FLOOR_ONLY：只给楼层 + 「地图/座位图/空着/有哪些房间」也走座位图
+  if (/地图|座位图|平面图|哪些座位|空着|哪些房间|哪几间|几间(?:房|自习室)/.test(t) && extractLibraryArea(t) && !/教室/.test(t)) {
     const date = extractDate(t, today);
     const area = extractLibraryArea(t)!;
+    const room = extractRoomName(t);
     return {
       tool: 'library_seat_map',
-      args: { areaId: area.id, date: date ?? today },
-      reason: `关键词：座位图（${area.name}）`,
+      args: { areaId: area.id, date: date ?? today, ...(room ? { room } : {}) },
+      reason: `关键词：座位图（${area.name}${room ? ` ${room}` : ''}）`,
     };
   }
 

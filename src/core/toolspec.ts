@@ -250,12 +250,14 @@ export const TOOL_SPECS: ToolSpec[] = [
       name: 'library_seat_map',
       description:
         '读某区域某天的**座位级**空闲情况（列出空着的座位号）。需要用户在浏览器里已登录 order.lib.zzu.edu.cn；若没登录/没打开那个页面，工具会告诉你先打开。' +
-        '用户问「一楼大厅哪些座位空着」「A12 有人吗」时用。**不要编造座位号**，只说工具返回的。',
+        '用户问「一楼大厅哪些座位空着」「A12 有人吗」时用。二层以上一层里有多间自习室：只给楼层会列出该层所有房间并各画一张图，给了 room 就只画那一间。' +
+        '**不要编造座位号**，只说工具返回的。',
       parameters: {
         type: 'object',
         properties: {
           areaId: { type: 'string', description: '区域 id（来自 library_seats 返回的 premises[].id 或 floors[].id，例如 "3"）' },
           date: { type: 'string', description: '日期 YYYY-MM-DD' },
+          room: { type: 'string', description: '房间名（可选）。用户点名某一间自习室/区时填，例如「A 区」；只说「二楼」就不要填，留给工具列出全部房间' },
         },
         required: ['areaId', 'date'],
         additionalProperties: false,

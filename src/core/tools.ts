@@ -4,7 +4,7 @@ import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
 import { planStudy, renderStudyPlan } from './study';
-import { librarySeatUrl, resolveLibraryDate, seatMapDataUri } from './library';
+import { librarySeatUrl, pickRoom, resolveLibraryDate, seatMapDataUri } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, dateOfWeek, todayShanghai, weekOfDate, weekdayOf } from './util';
@@ -481,16 +481,17 @@ export const librarySeatTool: ToolDefinition<{ date?: string }> = {
   },
 };
 
-export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string }> = {
+export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string; room?: string }> = {
   name: 'library_seat_map',
   description:
-    '读图书馆某个区域某天的**座位级**数据（哪个座位号空着）。需要用户已经在浏览器里登录 order.lib.zzu.edu.cn。用户问“一楼大厅还有哪些座位”“靠窗还有位置吗”“订 001”时先调这个确认。',
+    '读图书馆某个区域某天的**座位级**数据（哪个座位号空着）。需要用户已经在浏览器里登录 order.lib.zzu.edu.cn。用户问“一楼大厅还有哪些座位”“二楼有哪些房间”“三楼自习室 A 区还有位置吗”“靠窗还有位置吗”“订 001”时先调这个确认。二层以上一层里有多间房：只给楼层会把每间都画出来，给了 room 就只画那一间。',
   schema: z.object({
     areaId: z.string().min(1),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    room: z.string().min(1).optional(),
   }),
   async run(args) {
-    const res = await readLibrarySeats(args);
+    const res = await readLibrarySeats({ areaId: args.areaId, date: args.date });
     if (!res.ok || !res.data) {
       const openUrl = librarySeatUrl(args.areaId, args.date);
         return {
@@ -505,15 +506,33 @@ export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string }
         data: { error: true, raw: res.data.raw },
       };
     }
+
+    /* 点名了某一间就只画那间；没点名就把这一层所有房间都列出来 + 各画一张 */
+    const whole = res.data;
+    let map: typeof whole = whole;
+    let note = '';
+    if (args.room) {
+      const picked = pickRoom(whole, args.room);
+      if (picked) {
+        map = picked;
+      } else if ((whole.rooms?.length ?? 0) > 1) {
+        note = `这层没有叫「${args.room}」的房间，下面是全部 ${whole.rooms!.length} 间。`;
+      }
+    }
+
+    const text = [note, renderSeatMap(map)].filter(Boolean).join('\n\n');
+    const image = seatMapDataUri(map);
     return {
-      text: renderSeatMap(res.data),
+      text,
       data: {
         areaId: args.areaId,
         date: args.date,
-        free: res.data.seats.filter((s) => s.free).length,
-        total: res.data.seats.length,
-        seats: res.data.seats.slice(0, 200),
-        ...(seatMapDataUri(res.data) ? { image: seatMapDataUri(res.data), imageAlt: '图书馆座位平面图' } : {}),
+        ...(args.room ? { room: args.room } : {}),
+        free: map.seats.filter((s) => s.free).length,
+        total: map.seats.length,
+        ...(map.rooms?.length ? { rooms: map.rooms.map((r) => ({ name: r.name, free: r.free ?? 0, total: r.total ?? r.seats.length })) } : {}),
+        seats: map.seats.slice(0, 200),
+        ...(image ? { image, imageAlt: '图书馆座位平面图' } : {}),
         name: '图书馆座位图',
       },
     };

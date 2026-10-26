@@ -361,7 +361,8 @@ function App() {
         return 'ok';
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        // NOTE_VISIBLE：失败时必须把面板打开，否则用户只看到「已交给页面处理」
+        /* 失败时把面板打开，否则用户只看到「已交给页面处理」 */
+        setNavDir('fwd');
         setSheet('login');
         setNote(msg);
         return msg;
