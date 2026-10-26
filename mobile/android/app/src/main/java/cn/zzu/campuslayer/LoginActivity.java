@@ -70,12 +70,43 @@ public class LoginActivity extends Activity {
                         finishWithPayload(parts[1]);
                     }
                 });
+                startPoll();
             }
         });
 
         String start = getIntent().getStringExtra("url");
         web.loadUrl(start == null || start.isEmpty() ? AppConfig.LOGIN_URL : start);
         Toast.makeText(this, "用学校账号登录，成功后会自动回到应用", Toast.LENGTH_LONG).show();
+    }
+
+    private android.os.Handler poller;
+    private int pollCount = 0;
+
+    /** 落地页换完票才写 localStorage，所以每隔 1.5 秒读一次，最多 40 次（约 1 分钟）。 */
+    private void startPoll() {
+        if (poller != null) {
+            return;
+        }
+        poller = new android.os.Handler(android.os.Looper.getMainLooper());
+        poller.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (done) {
+                    return;
+                }
+                web.evaluateJavascript(SNAPSHOT, value -> {
+                    String raw = clean(value);
+                    String[] parts = raw.split("\n");
+                    if (parts.length > 1 && isJwt(parts[1])) {
+                        finishWithPayload(parts[1]);
+                    }
+                });
+                pollCount++;
+                if (!done && pollCount < 40) {
+                    poller.postDelayed(this, 1500);
+                }
+            }
+        }, 1500);
     }
 
     private static final String SNAPSHOT =
@@ -90,8 +121,18 @@ public class LoginActivity extends Activity {
 
         // 1) 我们最想要的：?ticket=<JWT>（指向静态样式文件时它会一直留着）
         if (url.contains("ticket=")) {
-            finishWithPayload(url);
-            return true;
+            // CAS 的普通服务票据（ST-xxxx）不是 JWT，解不出 idToken；
+            // 这种情况必须让页面继续加载——uniapp 会拿它去换票并写进 localStorage。
+            String tk = url.substring(url.indexOf("ticket=") + 7);
+            int amp = tk.indexOf('&');
+            if (amp >= 0) {
+                tk = tk.substring(0, amp);
+            }
+            if (tk.indexOf('.') > 0) {
+                finishWithPayload(url);
+                return true;
+            }
+            return false;
         }
 
         // 2) 某些落点直接给 idToken / userToken / token
@@ -183,6 +224,9 @@ public class LoginActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (poller != null) {
+            poller.removeCallbacksAndMessages(null);
+        }
         if (web != null) {
             web.destroy();
             web = null;
