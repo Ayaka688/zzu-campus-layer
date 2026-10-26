@@ -12,7 +12,7 @@
  */
 
 import { send } from './http';
-import { todayShanghai } from './util';
+import { addDays, todayShanghai } from './util';
 
 export const LIB_BASE = 'http://order.lib.zzu.edu.cn';
 
@@ -133,22 +133,36 @@ export function parseTopFor(
  * 一旦某台设备的本地日期算偏一天，就会稳定读不到座位。
  */
 export async function resolveLibraryDate(date?: string): Promise<{ date: string; dates: string[]; adjusted: boolean }> {
-  let dates: string[] = [];
-  try {
-    const res = await send<{ data?: { date?: string[] } }>(
-      LIB_BASE + '/v4/space/index',
-      { method: 'POST', body: JSON.stringify({ id: '1' }), token: '', source: 'portal' },
-    );
-    const list = res?.data?.date;
-    if (Array.isArray(list)) dates = list.filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
-  } catch {
-    /* 读不到就退回调用方给的日期，别把功能卡死 */
-  }
+  /*
+   * 这接口只接受「今天 / 明天」，其它日期一律 code=610（不是空列表，是直接报错）。
+   * 而馆站只有 http、PWA 在 https ⇒ 这里**不能再依赖网络**去问服务端日期窗口：
+   * 混合内容被拦后 fallback 会把模型给的旧日期原样发出去，于是四层全 610。
+   * 所以先按本地（Asia/Shanghai）算出今天/明天，网络只用于"如果通了就校正"。
+   */
+  const today = todayShanghai();
+  const tomorrow = addDays(today, 1);
+  const local = [today, tomorrow];
   const wanted = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '';
-  const fallback = todayShanghai() as string;
-  if (!dates.length) return { date: wanted || fallback, dates: [], adjusted: false };
+
+  let dates = local;
+  try {
+    const res = await send<{ data?: { date?: string[] } }>(LIB_BASE + '/v4/space/index', {
+      method: 'POST',
+      body: JSON.stringify({ id: '1' }),
+      token: '',
+      source: 'portal',
+    });
+    const list = res?.data?.date;
+    const got = Array.isArray(list)
+      ? list.filter((d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+      : [];
+    if (got.length) dates = got;
+  } catch {
+    /* 混合内容/离线：用本地算的今天明天，别把功能卡死 */
+  }
+
   if (wanted && dates.includes(wanted)) return { date: wanted, dates, adjusted: false };
-  return { date: dates[0] ?? fallback, dates, adjusted: Boolean(wanted) };
+  return { date: dates[0] ?? today, dates, adjusted: Boolean(wanted) };
 }
 
 /*
