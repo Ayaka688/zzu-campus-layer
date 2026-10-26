@@ -1,4 +1,6 @@
 import { render } from 'preact';
+
+declare const __APP_VERSION__: string;
 import { HoldButton } from '../src/ui/hold';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
@@ -144,6 +146,7 @@ function App() {
   const [renewBusy, setRenewBusy] = useState(false);
   const [renewNote, setRenewNote] = useState<'' | 'ok' | 'fail'>('');
   const [renewStep, setRenewStep] = useState('');
+  const buildVersion = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
   /* 配色：cream=米白 / ink=黑+藏青 / teal=黑+蓝绿（默认 ink） */
   const [theme, setTheme] = useState<ThemeName>('ink');
   const applyTheme = async (next: ThemeName) => {
@@ -715,6 +718,7 @@ function App() {
             </button>
           </div>
           {note && <p class="note">{note}</p>}
+          <p class="hint" style="opacity:.6">前端 v{buildVersion} · 壳桥：{typeof (window as any).CampusNotify?.renewLogin === 'function' ? '可用' : '不可用'}</p>
           <div class="theme-row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
             <button type="button" class="ghost" disabled={renewBusy} onClick={() => void doRenew()}>
               {renewBusy ? '续期中…' : '立即续期（验登录）'}

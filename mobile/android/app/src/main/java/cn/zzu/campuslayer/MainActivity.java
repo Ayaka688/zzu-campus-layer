@@ -62,6 +62,17 @@ public class MainActivity extends Activity {
         });
 
         /* 课前提醒：网页侧算好时间点，通过这个桥交给壳去设闹钟。 */
+        // App 版本变化就清一次 WebView 的 HTTP 缓存：壳是长期不关的 WebView，
+        // 旧 chunk / 旧 SW 会一直活着（cookie 与 localStorage 不动，登录态保留）。
+        try {
+            String vn = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            String last = getSharedPreferences("campus_layer", MODE_PRIVATE).getString("web_cache_ver", "");
+            if (!vn.equals(last)) {
+                web.clearCache(true);
+                getSharedPreferences("campus_layer", MODE_PRIVATE).edit().putString("web_cache_ver", vn).apply();
+            }
+        } catch (Exception ignored) {
+        }
         web.addJavascriptInterface(new NotifyBridge(), "CampusNotify");
 
         web.loadUrl(AppConfig.APP_URL);
