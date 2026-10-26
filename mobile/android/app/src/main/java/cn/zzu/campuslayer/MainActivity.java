@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private static final int REQ_LIB_LOGIN = 3002;
     private static final int REQ_LIB_BOOK = 3003;
     private boolean renewAsked = false;
+    private boolean renewing = false;
     private String PENDING_BOOK_REQ = null;
     private static final int REQ_LOGIN = 3001;
 
@@ -253,6 +254,7 @@ public class MainActivity extends Activity {
         menu.add(0, 2, 1, "从剪贴板导入");
         menu.add(0, 4, 2, "用系统浏览器登录");
         menu.add(0, 5, 2, "登录图书馆");
+        menu.add(0, 6, 3, "立即续期（验登录）");
         menu.add(0, 3, 3, "刷新");
         return true;
     }
@@ -265,11 +267,20 @@ public class MainActivity extends Activity {
             case 2: importFromClipboard(); return true;
             case 3: web.reload(); return true;
             case 5: openLibraryLogin(); return true;
+            case 6: forceRenew(); return true;
             default: return super.onOptionsItemSelected(item);
         }
     }
 
     /** 壳内登录：登录页在 WebView 里跑，拿到票就自动回来（不用复制地址）。 */
+    /** 菜单「立即续期」：不管剩多久，立刻走一次静默续期，用来当场验证。 */
+    private void forceRenew() {
+        Toast.makeText(this, "正在后台续期…", Toast.LENGTH_SHORT).show();
+        renewing = true;
+        startActivityForResult(new Intent(MainActivity.this, LoginActivity.class)
+                .putExtra("silent", true), REQ_LOGIN);
+    }
+
     private void openLogin() {
         startActivityForResult(new Intent(this, LoginActivity.class), REQ_LOGIN);
     }
@@ -305,8 +316,17 @@ public class MainActivity extends Activity {
         }
         String payload = data.getStringExtra("payload");
         if (payload == null || payload.trim().isEmpty()) {
-            Toast.makeText(this, "没拿到登录信息，再试一次", Toast.LENGTH_LONG).show();
+            if (renewing) {
+                renewing = false;
+                Toast.makeText(this, "续期失败：没拿到票，可能要在设置里重登一次", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "没拿到登录信息，再试一次", Toast.LENGTH_LONG).show();
+            }
             return;
+        }
+        if (renewing) {
+            renewing = false;
+            Toast.makeText(this, "续期成功，登录态已刷新", Toast.LENGTH_SHORT).show();
         }
         inject(payload.trim());
     }
