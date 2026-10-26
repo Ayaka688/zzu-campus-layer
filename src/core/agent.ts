@@ -75,7 +75,52 @@ function toolMessage(text: string, data: Record<string, unknown> | undefined): s
  * 用户原话里已经说清楚的相对日期/时段，覆盖模型给的值。
  * 模型算日期不可靠（实测把「后天」算成明天），这条规则比提示词管用。
  */
+/* 用户原话里可能出现的房间名 → 服务端区域 id（实测） */
+const ROOM_NAMES_OF_TEXT: Record<string, string> = {
+  一楼大厅: '3',
+  '工程与信息技术书库-1': '8',
+  工程与信息技术书库: '8',
+  '工程与信息书库-2': '9',
+  '社会科学书库-1': '11',
+  '社会科学书库-2': '12',
+  社会科学书库: '11',
+  语言文史书库: '13',
+  三楼西大厅: '14',
+  三楼中: '15',
+  三楼东大厅: '16',
+  自然与外文书库: '17',
+  电子阅览室: '18',
+  四楼西大厅: '19',
+  四楼东大厅: '20',
+  期刊阅览室: '76',
+};
+
 export function applyTextHints(name: string, args: Record<string, unknown>, text: string, today: string): Record<string, unknown> {
+  // FLOOR_HINT：座位图/余量的 areaId 只信用户原话里的楼层，别信模型自己编的数字
+  {
+    const toolName = String(name ?? '');
+    if (toolName === 'library_seat_map' || toolName === 'library_seats' || toolName === 'book_library_seat') {
+      const floor = /(一|1)\s*楼|大厅/.test(text)
+        ? '一楼'
+        : /(二|2)\s*楼/.test(text)
+          ? '二楼'
+          : /(三|3)\s*楼/.test(text)
+            ? '三楼'
+            : /(四|4)\s*楼/.test(text)
+              ? '四楼'
+              : '';
+      const room = Object.keys(ROOM_NAMES_OF_TEXT).find((r) => text.includes(r));
+      const next = { ...(args as Record<string, unknown>) };
+      if (room) next.areaId = ROOM_NAMES_OF_TEXT[room];
+      else if (floor) next.areaId = floor;
+      else if (typeof next.areaId === 'string' && Object.values(ROOM_NAMES_OF_TEXT).includes(next.areaId)) {
+        // 模型给的就是房间名，保留
+      }
+      args = next;
+    }
+  }
+
+
   const out = { ...args };
   const off = relativeDayOffset(text);
   const period = /上午|早上|一早/.test(text)
