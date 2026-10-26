@@ -151,6 +151,21 @@ export async function resolveLibraryDate(date?: string): Promise<{ date: string;
   return { date: dates[0] ?? fallback, dates, adjusted: Boolean(wanted) };
 }
 
+/*
+ * 楼层名 → 主校区可预约区域 id（实测 2026-10-26）。
+ *
+ * 这必须是**本地常量**：PWA 跑在 https（github.io），而图书馆站只有 http，
+ * 混合内容会拦掉 /v4/space/index，靠网络查表永远失败，于是原样把模型给的 "4" 发出去 → 610。
+ * 值来源：/v4/space/index 的 storey[].list（每层第一个房间）：
+ *   一楼 2（大厅，parentId=馆）、二楼 72（工程与信息技术书库-1）、三楼 52、四楼 53。
+ */
+const FLOOR_AREA_ID: Record<string, string> = {
+  一楼: '2',
+  二楼: '72',
+  三楼: '52',
+  四楼: '53',
+};
+
 /* 楼层名 ← 旧的写死 id（一楼早先写成 3，服务端楼层表里主校区一楼其实是 2） */
 const FLOOR_OF_LEGACY_ID: Record<string, string> = {
   '2': '一楼', '3': '一楼', '71': '一楼', '61': '一楼',
@@ -188,10 +203,22 @@ let _floorCache: FloorMap | null = null;
  * 传入 id 若不在服务端清单里（模型瞎填的 "3"），回落一楼，避免 610。
  */
 export async function resolveLibraryArea(areaId: string, premiseId = '1'): Promise<string> {
-  const floor = floorFromAreaId(areaId);
+  const raw = String(areaId ?? '').trim();
+  const floor = floorFromAreaId(raw);
+
+  // ① 本地表优先（不依赖网络，https 页面也一定能用）
+  if (floor && FLOOR_AREA_ID[floor]) return FLOOR_AREA_ID[floor];
+
+  // ② 已经是服务端认识的房间 id（72/52/53/71/61/24…）就原样用
+  if (Object.values(FLOOR_AREA_ID).includes(raw)) return raw;
+  if (Object.keys(FLOOR_OF_LEGACY_ID).includes(raw) && floor && FLOOR_AREA_ID[floor]) {
+    return FLOOR_AREA_ID[floor];
+  }
+
+  // ③ 本地表覆盖不到的（别的馆/别的楼层）：再问服务端
   const cached = _floorCache && Date.now() - _floorCache.at < 5 * 60 * 1000 ? _floorCache : null;
   if (cached && floor && cached.floors[floor]) return cached.floors[floor];
-  if (cached && !floor && cached.ids.has(String(areaId))) return areaId;
+  if (cached && !floor && cached.ids.has(raw)) return raw;
 
   try {
     const res = await send<{
@@ -223,14 +250,16 @@ export async function resolveLibraryArea(areaId: string, premiseId = '1'): Promi
     if (Object.keys(floors).length) {
       _floorCache = { at: Date.now(), floors, ids };
       if (floor && floors[floor]) return floors[floor];
-      if (ids.has(String(areaId))) return areaId;
+      if (ids.has(raw)) return raw;
       if (floors['一楼']) return floors['一楼'];
     }
   } catch {
-    /* 查不到就用传进来的 id */
+    /* 网络不通（多半是混合内容）：落到下面的兜底 */
   }
 
-  return floor && _floorCache?.floors[floor] ? (_floorCache.floors[floor] as string) : areaId;
+  // ④ 兜底：认不出就一楼，绝不把野 id 发出去换 610
+  if (floor && FLOOR_AREA_ID[floor]) return FLOOR_AREA_ID[floor];
+  return Object.values(FLOOR_AREA_ID).includes(raw) ? raw : (FLOOR_AREA_ID['一楼'] ?? raw);
 }
 
 export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
