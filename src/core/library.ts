@@ -176,47 +176,61 @@ function floorFromAreaId(areaId: string): string {
   return '';
 }
 
-type FloorMap = { at: number; floors: Record<string, string> };
+type FloorMap = { at: number; floors: Record<string, string>; ids: Set<string> };
 let _floorCache: FloorMap | null = null;
 
 /**
- * 按「楼层名 + 馆 id」从服务端楼层表现查区域 id（主校区 premiseId='1'）。
- * 失败时原样返回传入的 id，保持旧行为。
+ * 按「楼层名」从服务端楼层表现查可预约区域 id（主校区 premiseId='1'）。
+ *
+ * 关键事实（2026-10-26 实测）：服务端 storey[].list 里放的其实是**房间**，
+ * 它们的 parentId 指向楼层、不是馆；只有一楼大厅那种才 parentId=馆。
+ * 所以取每层第一个房间作为该层的代表 id（二楼 72、三楼 52、四楼 53…）。
+ * 传入 id 若不在服务端清单里（模型瞎填的 "3"），回落一楼，避免 610。
  */
 export async function resolveLibraryArea(areaId: string, premiseId = '1'): Promise<string> {
   const floor = floorFromAreaId(areaId);
-  if (!floor) return areaId;
-  if (_floorCache && Date.now() - _floorCache.at < 5 * 60 * 1000 && _floorCache.floors[floor]) {
-    return _floorCache.floors[floor] as string;
-  }
+  const cached = _floorCache && Date.now() - _floorCache.at < 5 * 60 * 1000 ? _floorCache : null;
+  if (cached && floor && cached.floors[floor]) return cached.floors[floor];
+  if (cached && !floor && cached.ids.has(String(areaId))) return areaId;
+
   try {
     const res = await send<{
-      data?: { storey?: Array<{ name?: string; list?: Array<{ id?: string | number; parentId?: string | number }> }> };
+      data?: {
+        storey?: Array<{
+          name?: string;
+          list?: Array<{ id?: string | number; parentId?: string | number }>;
+        }>;
+      };
     }>(LIB_BASE + '/v4/space/index', {
       method: 'POST',
       body: JSON.stringify({ id: premiseId }),
       token: '',
       source: 'portal',
     });
+
     const floors: Record<string, string> = {};
+    const ids = new Set<string>();
     for (const st of res?.data?.storey ?? []) {
-      const name = String(st?.name ?? '');
-      for (const item of st?.list ?? []) {
-        if (String(item?.parentId ?? '') === premiseId && item?.id != null) {
-          floors[name] = String(item.id);
-          break;
-        }
-      }
+      const name = String(st?.name ?? '').trim();
+      const list = (st?.list ?? []).filter((x) => x?.id != null);
+      for (const item of list) ids.add(String(item.id));
+      if (!list.length) continue;
+      const direct = list.find((x) => String(x?.parentId ?? '') === premiseId);
+      const pick = direct ?? list[0];
+      if (pick?.id != null) floors[name] = String(pick.id);
     }
+
     if (Object.keys(floors).length) {
-      _floorCache = { at: Date.now(), floors };
-      const hit = floors[floor];
-      if (hit) return hit;
+      _floorCache = { at: Date.now(), floors, ids };
+      if (floor && floors[floor]) return floors[floor];
+      if (ids.has(String(areaId))) return areaId;
+      if (floors['一楼']) return floors['一楼'];
     }
   } catch {
     /* 查不到就用传进来的 id */
   }
-  return areaId;
+
+  return floor && _floorCache?.floors[floor] ? (_floorCache.floors[floor] as string) : areaId;
 }
 
 export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
