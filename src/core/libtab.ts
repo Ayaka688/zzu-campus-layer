@@ -1,3 +1,4 @@
+import { addDays } from './util';
 declare const __APP_VERSION__: string;
 /**
  * 与「图书馆空间预约」页面里的 content script 通信。
@@ -154,8 +155,11 @@ export async function readLibrarySeats(args: {
   const cands = areaCandidates(args.areaId);
   const triedIds: string[] = [];
   let bridgeErr = '';
+  // 610 = 该区域当天不可约（常见原因是已过可预约时间或当天已满），
+  // 所以先试请求的日期，全 610 再试明天一次。
+  for (const day of [args.date, addDays(args.date, 1)]) {
   for (const id of cands) {
-    const bridged = bridgeNativeSeats(id, args.date);
+    const bridged = bridgeNativeSeats(id, day);
     if (!bridged) break;
     const json = await bridged;
     let outer: { ok?: boolean; error?: string; raw?: unknown };
@@ -193,9 +197,10 @@ export async function readLibrarySeats(args: {
         seats,
         areaId: id,
         tried: triedIds,
-        diag: `date=${args.date} ${describePayload(outer.raw)}`,
+        diag: `date=${day} ${describePayload(outer.raw)}` + (day !== args.date ? '（今天已过可预约时间，下面是明天的）' : ''),
       },
     };
+  }
   }
   // 桥没拿到：把试过的 id 记下来，继续走下面的网页路径（那里还会再试一次）
   if (bridgeErr) console.warn('[lib] 桥试过', triedIds.join('、'), bridgeErr);
