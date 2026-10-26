@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { librarySeatMapTool, bookLibrarySeatTool } from '../src/core/tools';
 import { resolveLibraryArea } from '../src/core/library';
 
 /* 图书馆只有 http，PWA 跑在 https 上 fetch 必被混合内容拦，
@@ -32,4 +33,24 @@ describe('resolveLibraryArea 不依赖网络', () => {
       await expect(resolveLibraryArea(input)).resolves.toBe(want);
     });
   }
+});
+
+describe('楼层/房间这类语义参数（模型只填这个，不填数字 id）', () => {
+  const date = '2026-10-27';
+  it('library_seat_map 接受 floor: 二楼', () => {
+    const ok = librarySeatMapTool.schema.safeParse({ floor: '二楼', date });
+    expect(ok.success).toBe(true);
+  });
+  it('library_seat_map 也接受 room: 语言文史书库', () => {
+    const ok = librarySeatMapTool.schema.safeParse({ room: '语言文史书库', date });
+    expect(ok.success).toBe(true);
+  });
+  it('楼层写错（五楼）要被 schema 拦下', () => {
+    const ok = librarySeatMapTool.schema.safeParse({ floor: '五楼', date });
+    expect(ok.success).toBe(false);
+  });
+  it('book_library_seat 只需要 floor + date + seatNo', () => {
+    const ok = bookLibrarySeatTool.schema.safeParse({ floor: '三楼', date, seatNo: '001' });
+    expect(ok.success).toBe(true);
+  });
 });

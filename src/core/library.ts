@@ -200,7 +200,7 @@ const FLOOR_AREA_ALTS: Record<string, string[]> = {
   四楼: ['18', '19', '20', '76', '53', '6'],
 };
 
-const FLOOR_AREA_ID: Record<string, string> = {
+export const FLOOR_AREA_ID: Record<string, string> = {
   一楼: '3',
   二楼: '8',
   三楼: '13',

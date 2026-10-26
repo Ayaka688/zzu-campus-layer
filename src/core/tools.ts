@@ -4,7 +4,7 @@ import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
 import { planStudy, renderStudyPlan } from './study';
-import { librarySeatUrl, pickRoom, resolveLibraryDate, seatMapDataUri } from './library';
+import { librarySeatUrl, pickRoom, resolveLibraryDate, seatMapDataUri, areaIdByName, FLOOR_AREA_ID } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, dateOfWeek, todayShanghai, weekOfDate, weekdayOf } from './util';
@@ -460,6 +460,24 @@ export const getTodos: ToolDefinition<Record<string, never>> = {
   },
 };
 
+const FLOOR_NAMES = ['一楼', '二楼', '三楼', '四楼'] as const;
+type FloorName = (typeof FLOOR_NAMES)[number];
+
+/**
+ * 把模型给的语义参数折算成馆站的区域 id。
+ * 模型只需要说"二楼"或"语言文史书库"，不用（也不该）记数字 id。
+ */
+function resolveLibraryArea(args: { floor?: string; room?: string; areaId?: string }): string {
+  if (args.room) {
+    const byRoom = areaIdByName(args.room);
+    if (byRoom) return byRoom;
+  }
+  const f = args.floor as FloorName | undefined;
+  if (f && FLOOR_AREA_ID[f]) return FLOOR_AREA_ID[f];
+  if (args.areaId) return args.areaId;
+  return FLOOR_AREA_ID['一楼'] ?? '3';
+}
+
 export const librarySeatTool: ToolDefinition<{ date?: string }> = {
   name: 'library_seats',
   description:
@@ -481,19 +499,26 @@ export const librarySeatTool: ToolDefinition<{ date?: string }> = {
   },
 };
 
-export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string; room?: string }> = {
+export const librarySeatMapTool: ToolDefinition<{
+  floor?: FloorName;
+  room?: string;
+  areaId?: string;
+  date: string;
+}> = {
   name: 'library_seat_map',
   description:
     '读图书馆某个区域某天的**座位级**数据（哪个座位号空着）。需要用户已经在浏览器里登录 order.lib.zzu.edu.cn。用户问“一楼大厅还有哪些座位”“二楼有哪些房间”“三楼自习室 A 区还有位置吗”“靠窗还有位置吗”“订 001”时先调这个确认。二层以上一层里有多间房：只给楼层会把每间都画出来，给了 room 就只画那一间。',
   schema: z.object({
-    areaId: z.string().min(1),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    floor: z.enum(FLOOR_NAMES).optional(),
     room: z.string().min(1).optional(),
+    areaId: z.string().min(1).optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   }),
   async run(args) {
-    const res = await readLibrarySeats({ areaId: args.areaId, date: args.date });
+    const area = resolveLibraryArea(args);
+    const res = await readLibrarySeats({ areaId: area, date: args.date });
     if (!res.ok || !res.data) {
-      const openUrl = librarySeatUrl(args.areaId, args.date);
+      const openUrl = librarySeatUrl(area, args.date);
         return {
           text: res.error ?? '读不到座位图。',
           data: { error: true, url: openUrl, name: '座位预约', args },
@@ -525,7 +550,7 @@ export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string; 
     return {
       text,
       data: {
-        areaId: args.areaId,
+        areaId: area,
         date: args.date,
         ...(args.room ? { room: args.room } : {}),
         free: map.seats.filter((s) => s.free).length,
@@ -543,22 +568,31 @@ export const librarySeatMapTool: ToolDefinition<{ areaId: string; date: string; 
  * 下单工具：**只产出「待确认」的动作用户看**，绝不自己下单。
  * 真正的执行由面板上的长按按钮触发（`lib:book` → content script 操作页面）。
  */
-export const bookLibrarySeatTool: ToolDefinition<{ areaId: string; date: string; seatNo: string }> = {
+export const bookLibrarySeatTool: ToolDefinition<{
+  floor?: FloorName;
+  room?: string;
+  areaId?: string;
+  date: string;
+  seatNo: string;
+}> = {
   name: 'book_library_seat',
   description:
     '准备一条图书馆座位预约（**不会真的下单**）。用户说“帮我订 001”“订一楼大厅 A12，明天”时调用；返回后界面上会出现需要**长按**的确认按钮，用户长按才会真的提交。',
   schema: z.object({
-    areaId: z.string().min(1),
+    floor: z.enum(FLOOR_NAMES).optional(),
+    room: z.string().min(1).optional(),
+    areaId: z.string().min(1).optional(),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     seatNo: z.string().min(1),
   }),
   async run(args) {
+    const area = resolveLibraryArea(args);
     return {
-      text: `要预约 **${args.date}** 的座位 **${args.seatNo}**（区域 ${args.areaId}）。\n下面那个按钮要**长按**才会提交，误触不会下单。`,
+      text: `要预约 **${args.date}** 的座位 **${args.seatNo}**（区域 ${area}）。\n下面那个按钮要**长按**才会提交，误触不会下单。`,
       data: {
         action: {
           kind: 'library-book',
-          areaId: args.areaId,
+          areaId: area,
           date: args.date,
           seatNo: args.seatNo,
           label: `长按预约 ${args.seatNo}`,
