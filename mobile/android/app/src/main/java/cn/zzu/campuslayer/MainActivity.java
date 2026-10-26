@@ -273,6 +273,17 @@ public class MainActivity extends Activity {
     }
 
     /** 壳内登录：登录页在 WebView 里跑，拿到票就自动回来（不用复制地址）。 */
+    /** PWA 面板上的「立即续期」按钮：走这里（壳没有可用的右上角菜单）。 */
+    @android.webkit.JavascriptInterface
+    public void renewLogin() {
+        web.post(new Runnable() {
+            @Override
+            public void run() {
+                forceRenew();
+            }
+        });
+    }
+
     /** 菜单「立即续期」：不管剩多久，立刻走一次静默续期，用来当场验证。 */
     private void forceRenew() {
         Toast.makeText(this, "正在后台续期…", Toast.LENGTH_SHORT).show();
@@ -319,6 +330,7 @@ public class MainActivity extends Activity {
             if (renewing) {
                 renewing = false;
                 Toast.makeText(this, "续期失败：没拿到票，可能要在设置里重登一次", Toast.LENGTH_LONG).show();
+                web.evaluateJavascript("window.__campusRenew&&window.__campusRenew('fail')", null);
             } else {
                 Toast.makeText(this, "没拿到登录信息，再试一次", Toast.LENGTH_LONG).show();
             }
@@ -327,6 +339,7 @@ public class MainActivity extends Activity {
         if (renewing) {
             renewing = false;
             Toast.makeText(this, "续期成功，登录态已刷新", Toast.LENGTH_SHORT).show();
+            web.evaluateJavascript("window.__campusRenew&&window.__campusRenew('ok')", null);
         }
         inject(payload.trim());
     }

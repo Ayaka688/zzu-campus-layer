@@ -103,8 +103,27 @@ function App() {
   );
   const [noticeCards, setNoticeCards] = useState<NoticeCard[]>([]);
   const [noticeDigest, setNoticeDigest] = useState<TodayDigest | null>(null);
+  /** 壳里点「立即续期」：调原生桥，成功/失败由 __campusRenew 回调。 */
+  async function doRenew() {
+    const bridge = (window as any).CampusNotify;
+    if (!bridge?.renewLogin) {
+      pushNote('续期只能在安卓壳里用（浏览器里刷新页面就等于重登）。');
+      return;
+    }
+    setRenewBusy(true);
+    setRenewNote('');
+    try {
+      bridge.renewLogin();
+    } catch {
+      setRenewBusy(false);
+      setRenewNote('fail');
+    }
+  }
+
   /* 两类通知分开控制：课前提醒默认开（学生本来就想被提醒），资讯通知默认关（不打扰）。 */
   const [notifyClass, setNotifyClass] = useState(true);
+  const [renewBusy, setRenewBusy] = useState(false);
+  const [renewNote, setRenewNote] = useState<'' | 'ok' | 'fail'>('');
   /* 配色：cream=米白（默认）/ ink=黑+藏青 */
   const [theme, setTheme] = useState<'cream' | 'ink'>('ink');
   const applyTheme = async (next: 'cream' | 'ink') => {
@@ -302,6 +321,10 @@ function App() {
    */
   useEffect(() => {
     const w = window as unknown as Record<string, unknown>;
+    w.__campusRenew = (r: string) => {
+      setRenewBusy(false);
+      setRenewNote(r === 'ok' ? 'ok' : 'fail');
+    };
     w.__campusImport = async (raw: string): Promise<string> => {
       try {
         const bundle = parseImportLink(String(raw ?? ''));
@@ -649,6 +672,13 @@ function App() {
             </button>
           </div>
           {note && <p class="note">{note}</p>}
+          <div class="theme-row" style="margin-bottom:12px">
+            <button type="button" class="ghost" disabled={renewBusy} onClick={() => void doRenew()}>
+              {renewBusy ? '续期中…' : '立即续期（验登录）'}
+            </button>
+            {renewNote === 'ok' && <span class="hint ok">续期成功</span>}
+            {renewNote === 'fail' && <span class="hint warn">续期失败，可能要在设置里重登一次</span>}
+          </div>
           <div class="theme-row">
               <span>配色</span>
               <button type="button" class={theme === 'cream' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('cream')}>米白</button>
