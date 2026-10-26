@@ -31,6 +31,7 @@ public class MainActivity extends Activity {
 
     private static final int REQ_LIB_LOGIN = 3002;
     private static final int REQ_LIB_BOOK = 3003;
+    private boolean renewAsked = false;
     private String PENDING_BOOK_REQ = null;
     private static final int REQ_LOGIN = 3001;
 
@@ -169,6 +170,23 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * 登录态快到期（<2 小时）时，在后台静默续一次：
+     * CAS 的 TGT cookie 还在的话，登录页会直接 302 带 ticket 回来，不用你重登。
+     */
+    private void maybeSilentRenew() {
+        if (renewAsked || web == null) {
+            return;
+        }
+        renewAsked = true;
+        web.evaluateJavascript("(function(){try{var raw=localStorage.getItem('campus-layer:tokens');if(!raw)return '{\"need\":false}';var o=JSON.parse(raw);var j=(o.jwxt&&o.jwxt.token)||'';if(!j)return '{\"need\":false}';var b=j.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');var p=JSON.parse(decodeURIComponent(escape(atob(b))));var left=Math.round((p.exp*1000-Date.now())/60000);return JSON.stringify({need:left<120,leftMin:left});}catch(e){return '{\"need\":false}'}})()", value -> {
+            String s = value == null ? "" : value;
+            if (s.contains("\"need\":true")) {
+                startActivityForResult(new Intent(MainActivity.this, LoginActivity.class).putExtra("silent", true), REQ_LOGIN);
+            }
+        });
+    }
+
     /** Android 13+ 通知要用户授权，没有就当场问一次。 */
     private void askNotificationPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
@@ -291,6 +309,12 @@ public class MainActivity extends Activity {
             return;
         }
         inject(payload.trim());
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        maybeSilentRenew();
     }
 
     @Override

@@ -23,16 +23,25 @@ import android.widget.Toast;
  */
 public class LoginActivity extends Activity {
 
+    private boolean silent = false;
+
     private WebView web;
     private boolean done;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        silent = getIntent().getBooleanExtra("silent", false);
 
         web = new WebView(this);
-        setContentView(web, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (silent) {
+            // 静默续期：不占屏幕、不给用户任何感知
+            web.setAlpha(0f);
+            setContentView(web, new ViewGroup.LayoutParams(1, 1));
+        } else {
+            setContentView(web, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -76,7 +85,9 @@ public class LoginActivity extends Activity {
 
         String start = getIntent().getStringExtra("url");
         web.loadUrl(start == null || start.isEmpty() ? AppConfig.LOGIN_URL : start);
-        Toast.makeText(this, "用学校账号登录，成功后会自动回到应用", Toast.LENGTH_LONG).show();
+        if (!silent) {
+            Toast.makeText(this, "用学校账号登录，成功后会自动回到应用", Toast.LENGTH_LONG).show();
+        }
     }
 
     private android.os.Handler poller;
