@@ -106,17 +106,22 @@ function App() {
   /** 壳里点「立即续期」：调原生桥，成功/失败由 __campusRenew 回调。 */
   async function doRenew() {
     const bridge = (window as any).CampusNotify;
-    if (!bridge?.renewLogin) {
-      pushNote('续期只能在安卓壳里用（浏览器里刷新页面就等于重登）。');
+    const has = typeof bridge?.renewLogin === 'function';
+    setRenewNote('');
+    if (!has) {
+      setRenewNote('fail');
+      pushNote('这个包里没有续期接口：装的不是 0.2.28 之后的包，或者 WebView 没加载新前端。');
       return;
     }
     setRenewBusy(true);
-    setRenewNote('');
+    setRenewStep('已发出，等壳回话…');
     try {
       bridge.renewLogin();
-    } catch {
+    } catch (e) {
       setRenewBusy(false);
+      setRenewStep('');
       setRenewNote('fail');
+      pushNote('调续期接口失败：' + String(e));
     }
   }
 
@@ -124,6 +129,7 @@ function App() {
   const [notifyClass, setNotifyClass] = useState(true);
   const [renewBusy, setRenewBusy] = useState(false);
   const [renewNote, setRenewNote] = useState<'' | 'ok' | 'fail'>('');
+  const [renewStep, setRenewStep] = useState('');
   /* 配色：cream=米白（默认）/ ink=黑+藏青 */
   const [theme, setTheme] = useState<'cream' | 'ink'>('ink');
   const applyTheme = async (next: 'cream' | 'ink') => {
@@ -323,7 +329,9 @@ function App() {
     const w = window as unknown as Record<string, unknown>;
     w.__campusRenew = (r: string) => {
       setRenewBusy(false);
+      setRenewStep('');
       setRenewNote(r === 'ok' ? 'ok' : 'fail');
+      void refresh();
     };
     w.__campusImport = async (raw: string): Promise<string> => {
       try {
@@ -672,12 +680,16 @@ function App() {
             </button>
           </div>
           {note && <p class="note">{note}</p>}
-          <div class="theme-row" style="margin-bottom:12px">
+          <div class="theme-row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
             <button type="button" class="ghost" disabled={renewBusy} onClick={() => void doRenew()}>
               {renewBusy ? '续期中…' : '立即续期（验登录）'}
             </button>
+            <span class="hint" style="opacity:.7">
+              壳桥：{typeof (window as any).CampusNotify?.renewLogin === 'function' ? '可用' : '不可用'}
+            </span>
+            {renewStep && <span class="hint">{renewStep}</span>}
             {renewNote === 'ok' && <span class="hint ok">续期成功</span>}
-            {renewNote === 'fail' && <span class="hint warn">续期失败，可能要在设置里重登一次</span>}
+            {renewNote === 'fail' && <span class="hint warn">续期失败（看下面提示）</span>}
           </div>
           <div class="theme-row">
               <span>配色</span>
