@@ -175,7 +175,7 @@ export async function resolveLibraryDate(date?: string): Promise<{ date: string;
  */
 /* 同一层的其它可预约房间（610 = 该房间当天未开放时，挨个试下一个） */
 const FLOOR_AREA_ALTS: Record<string, string[]> = {
-  一楼: ['2', '71', '61'],
+  一楼: ['3', '2', '71', '61'],
   二楼: ['72', '24', '4'],
   三楼: ['52', '5'],
   四楼: ['53', '6'],
