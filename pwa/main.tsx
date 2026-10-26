@@ -255,7 +255,25 @@ function App() {
   useEffect(() => {
     void refresh();
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./pwa-sw.js').catch(() => undefined);
+      navigator.serviceWorker.register('./pwa-sw.js', { updateViaCache: 'none' }).then((reg) => {
+      void reg.update();
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            try {
+              if (!sessionStorage.getItem('sw-reloaded')) {
+                sessionStorage.setItem('sw-reloaded', '1');
+                location.reload();
+              }
+            } catch {
+              /* 无痕/隐私模式忽略 */
+            }
+          }
+        });
+      });
+    }).catch(() => undefined);
     }
     // 装了安卓壳的话，每次打开都把未来 7 天的课前提醒重排一遍
     void syncReminders();

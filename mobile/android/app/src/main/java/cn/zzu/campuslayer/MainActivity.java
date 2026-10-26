@@ -69,6 +69,11 @@ public class MainActivity extends Activity {
             String last = getSharedPreferences("campus_layer", MODE_PRIVATE).getString("web_cache_ver", "");
             if (!vn.equals(last)) {
                 web.clearCache(true);
+                // 只清 HTTP 缓存不够：旧 Service Worker 仍会拿缓存里的 index.html，
+                // 于是前端永远停在旧 chunk。这里注销 SW + 清 caches，随后重载一次。
+                web.evaluateJavascript(
+                    "(async()=>{try{const rs=await navigator.serviceWorker.getRegistrations();for(const r of rs)await r.unregister();const ks=await caches.keys();for(const k of ks)await caches.delete(k);}catch(e){}})()",
+                    null);
                 getSharedPreferences("campus_layer", MODE_PRIVATE).edit().putString("web_cache_ver", vn).apply();
             }
         } catch (Exception ignored) {

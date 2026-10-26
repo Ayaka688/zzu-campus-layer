@@ -7,7 +7,7 @@
  * 原因：assets 文件名带 hash 不会变内容，缓起来最划算；但 index.html 决定这次要用哪套 assets，
  * 一旦被永久缓存，新部署的代码就永远进不来——安卓壳里尤其明显（它就是一个长期不关的 WebView）。
  */
-const CACHE = 'campus-layer-v7';
+const CACHE = 'campus-layer-v8';
 const SCOPE = self.registration ? self.registration.scope : '/';
 /*
  * 预缓存清单：只放**仓库里一定存在**的文件。
