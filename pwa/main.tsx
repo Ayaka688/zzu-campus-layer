@@ -1,6 +1,6 @@
 import { render } from 'preact';
 import { HoldButton } from '../src/ui/hold';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { ask } from '../src/core/agent';
 import { getKV, parseImportLink } from '../src/core/kv';
 import { probeLlm } from '../src/core/llm';
@@ -145,9 +145,13 @@ function App() {
   const [quickAsks, setQuickAsks] = useState<QuickAsk[]>(defaultQuickAsks);
   const [quickEditing, setQuickEditing] = useState(false);
   const [today] = useState(todayShanghai());
-  const bottom = useRef<HTMLDivElement | null>(null);
+  const scroller = useRef<HTMLElement | null>(null);
   /* refresh() 读完存档之前别回写，否则会用空列表把上次的记录覆盖掉 */
   const hydrated = useRef(false);
+  /* 刚从存档恢复出来的那一批：这一帧不滚到底，让人从最上面开始看 */
+  const restored = useRef<Message[] | null>(null);
+  /* 用户往回翻的时候别把他拽回底部 */
+  const stickBottom = useRef(true);
   const isHttps = typeof location !== 'undefined' && location.protocol === 'https:';
 
   async function refresh() {
@@ -164,7 +168,9 @@ function App() {
       setNotifyNews(newsPref === true);
       setQuickAsks(await loadQuickAsks());
       // 上次聊的那几条带回来：换页面/重开不该从空白开始
-      setMessages(await loadTranscript<Message>());
+      const items = await loadTranscript<Message>();
+      restored.current = items;
+      setMessages(items);
       hydrated.current = true;
   }
 
@@ -236,11 +242,21 @@ function App() {
     void syncReminders();
   }, []);
 
+  /* 恢复存档：在绘制之前直接跳到底部（最新一条），不带滑下去那一段动画 */
+  useLayoutEffect(() => {
+    if (restored.current !== messages) return;
+    restored.current = null;
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (!stickBottom.current) return;
+    const el = scroller.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages, busy]);
 
-  /* 每次聊完落一次盘：只留最近 5 条，重字段在 transcript.ts 里洗掉 */
+  /* 每次聊完落一次盘：只留最近 10 条，重字段在 transcript.ts 里洗掉 */
   useEffect(() => {
     if (!hydrated.current) return;
     const timer = setTimeout(() => {
@@ -621,6 +637,8 @@ function App() {
             <>
               <p class="hint">
                 <strong>办法一（推荐）：用学校账号登录</strong>
+                <br />
+                登录页上<strong>勾一下「记住我」</strong>：教务票能用 30 天，桌面上的扩展还会在过期时自己续一次，不用天天重登。
               </p>
               <p class="row">
                 <a class="primary" href={CAS_LOGIN} target="_blank" rel="noreferrer">
@@ -752,7 +770,15 @@ function App() {
           />
         </main>
       ) : (
-        <main class={slide.trim()} key="chat">
+        <main
+          ref={scroller}
+          class={slide.trim()}
+          key="chat"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+          }}
+        >
         
         {messages.map((m, i) => (
           <div class={`msg ${m.role}`} key={`${i}-${m.role}`}>
@@ -799,7 +825,7 @@ function App() {
             <div class="bubble">{llm.enabled ? '查询中…（认不出的说法会先问模型）' : '查询中…'}</div>
           </div>
         )}
-        <div ref={bottom} />
+        <div />
       </main>
       )}
 

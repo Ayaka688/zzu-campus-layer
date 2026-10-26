@@ -9,8 +9,10 @@ export const TRANSCRIPT_KEY = 'transcript';
  * 注意这**不是**在控制模型的上下文：真正发出去的历史由 agent 自己
  * `slice(-MAX_HISTORY)` 管（见 src/core/agent.ts）。这里管两件事：
  * 聊天记录别越滚越长、换页面/重开之后还能看见刚才聊的那几轮。
+ *
+ * 10 条 = 我问的和他答的加在一起 10 条，一屏能看完，又不至于翻不到上一轮。
  */
-export const TRANSCRIPT_LIMIT = 5;
+export const TRANSCRIPT_LIMIT = 10;
 
 /** 这些字段是给界面画图、建文件的，存进去只占地方（座位图一张 data URI 就 20KB）。 */
 const HEAVY_KEYS = ['image', 'seats', 'ics', 'raw', 'svg'];

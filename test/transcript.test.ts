@@ -35,15 +35,15 @@ const convo = (n: number): TranscriptItem[] =>
   }));
 
 describe('trimTranscript', () => {
-  it('只留最近 5 条', () => {
-    expect(TRANSCRIPT_LIMIT).toBe(5);
-    const kept = trimTranscript(convo(12));
-    expect(kept).toHaveLength(5);
-    expect(kept[0]!.text).toBe('第 8 条');
-    expect(kept[4]!.text).toBe('第 12 条');
+  it('只留最近 10 条（我发的和他回的一起算）', () => {
+    expect(TRANSCRIPT_LIMIT).toBe(10);
+    const kept = trimTranscript(convo(18));
+    expect(kept).toHaveLength(10);
+    expect(kept[0]!.text).toBe('第 9 条');
+    expect(kept[9]!.text).toBe('第 18 条');
   });
 
-  it('不够 5 条时原样返回，顺序不变', () => {
+  it('不够 10 条时原样返回，顺序不变', () => {
     expect(trimTranscript(convo(3)).map((m) => m.text)).toEqual(['第 1 条', '第 2 条', '第 3 条']);
   });
 
@@ -122,8 +122,8 @@ describe('sanitizeTranscript', () => {
     expect(out[0]!.data).toBeUndefined();
   });
 
-  it('洗完仍然只留最近 5 条', () => {
-    expect(sanitizeTranscript(convo(9))).toHaveLength(5);
+  it('洗完仍然只留最近 10 条', () => {
+    expect(sanitizeTranscript(convo(15))).toHaveLength(10);
   });
 
   it('保留 error / llmError 这些排错信息', () => {
@@ -148,14 +148,14 @@ describe('存档读写', () => {
     expect(back.map((m) => m.text)).toEqual(['第 1 条', '第 2 条', '第 3 条', '第 4 条']);
   });
 
-  it('存进去的永远只有 5 条', async () => {
+  it('存进去的永远只有 10 条', async () => {
     const kv = memKV();
     await saveTranscript(convo(20), kv);
     const stored = kv.dump()[TRANSCRIPT_KEY] as { v: number; at: number; items: TranscriptItem[] };
     expect(stored.v).toBe(1);
     expect(typeof stored.at).toBe('number');
-    expect(stored.items).toHaveLength(5);
-    expect(stored.items[4]!.text).toBe('第 20 条');
+    expect(stored.items).toHaveLength(10);
+    expect(stored.items[9]!.text).toBe('第 20 条');
   });
 
   it('没有存档时返回空数组', async () => {
