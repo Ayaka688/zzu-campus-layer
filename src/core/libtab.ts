@@ -9,7 +9,7 @@
  * 找不到标签页不是错误，而是「这条路现在不能用」——调用方要能优雅降级。
  */
 
-import { resolveLibraryArea, resolveLibraryDate } from './library';
+import { resolveLibraryArea, resolveLibraryDate, areaCandidates } from './library';
 import { parseSeatMap, type LibSeatMap } from './library';
 import type { BookOutcome } from './libBook';
 
@@ -148,8 +148,14 @@ export async function readLibrarySeats(args: {
     args = { ...args, date: fixed, areaId: areaFixed };
   }
   // 安卓壳：走原生桥（原生 HTTP 不受 CORS / 混合内容限制）
-  const bridged = bridgeNativeSeats(args.areaId, args.date);
-  if (bridged) {
+  // 同层可能有多个房间：610 = 该房间当天未开放，挨个试，别再原样把野 id 发出去。
+  const hasBridge = typeof window !== 'undefined' && !!(window as any).CampusNotify && typeof (window as any).CampusNotify.libSeats === 'function';
+  const cands = hasBridge ? areaCandidates(args.areaId) : [];
+  const triedIds: string[] = [];
+  let bridgeErr = '';
+  for (const id of cands) {
+    const bridged = bridgeNativeSeats(id, args.date);
+    if (!bridged) break;
     const json = await bridged;
     let outer: { ok?: boolean; error?: string; raw?: unknown };
     try {
@@ -157,9 +163,12 @@ export async function readLibrarySeats(args: {
     } catch {
       return { ok: false, error: '原生桥返回的不是 JSON' };
     }
-    if (!outer.ok) return { ok: false, error: outer.error ?? '图书馆接口失败' };
+    triedIds.push(id);
+    if (!outer.ok) {
+      bridgeErr = String(outer.error ?? '');
+      continue;
+    }
 
-    // 服务端把「被别处顶掉」也放在 200 里（code=10001），必须翻成人话
     const raw = (outer.raw ?? {}) as { code?: number | string; message?: string };
     if (String(raw.code) === '10001') {
       const msg = String(raw.message ?? '');
@@ -168,19 +177,27 @@ export async function readLibrarySeats(args: {
         ok: false,
         error: kicked
           ? '图书馆只允许一台设备在线：刚才在手机或电脑上登录过，这里被顶掉了。点「登录图书馆」重登一次就好。'
-          : `图书馆要重新登录（${msg || '未登录'}）：点菜单里的「登录图书馆」。`,
+          : `图书馆要重新登录（${msg || '未登录'}）：点设置面板里的「登录图书馆」。`,
       };
+    }
+
+    const seats = parseSeatMap(outer.raw).seats;
+    if (seats.length === 0) {
+      bridgeErr = describePayload(outer.raw);
+      continue;
     }
     return {
       ok: true,
       data: {
-        seats: parseSeatMap(outer.raw).seats,
-        areaId: args.areaId,
-        tried: [args.areaId],
-        diag: describePayload(outer.raw),
+        seats,
+        areaId: id,
+        tried: triedIds,
+        diag: `date=${args.date} ${describePayload(outer.raw)}`,
       },
     };
   }
+  // 桥没拿到：把试过的 id 记下来，继续走下面的网页路径（那里还会再试一次）
+  if (bridgeErr) console.warn('[lib] 桥试过', triedIds.join('、'), bridgeErr);
   const tab = await findLibraryTab();
   if (!tab?.id) {
     return {
@@ -193,7 +210,7 @@ export async function readLibrarySeats(args: {
   // 模型给的 areaId 经常是「一楼」的另一个编码（storeys 里 2、payload 里 3），
   // 所以拿到空座位表就换下一个候选 id 再试——座位表非空才说明 id 对。
   const token = await pageToken(tab.id);
-  const candidates = [args.areaId, '3', '4', '5', '6'].filter((v, i, a) => v && a.indexOf(v) === i);
+  const candidates = areaCandidates(args.areaId);
   const tried: string[] = [];
   let empty: {
     seats: { no: string; status: string; free: boolean }[];

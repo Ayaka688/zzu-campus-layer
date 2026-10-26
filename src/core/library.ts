@@ -173,6 +173,14 @@ export async function resolveLibraryDate(date?: string): Promise<{ date: string;
  * 值来源：/v4/space/index 的 storey[].list（每层第一个房间）：
  *   一楼 2（大厅，parentId=馆）、二楼 72（工程与信息技术书库-1）、三楼 52、四楼 53。
  */
+/* 同一层的其它可预约房间（610 = 该房间当天未开放时，挨个试下一个） */
+const FLOOR_AREA_ALTS: Record<string, string[]> = {
+  一楼: ['2', '71', '61'],
+  二楼: ['72', '24', '4'],
+  三楼: ['52', '5'],
+  四楼: ['53', '6'],
+};
+
 const FLOOR_AREA_ID: Record<string, string> = {
   一楼: '2',
   二楼: '72',
@@ -274,6 +282,18 @@ export async function resolveLibraryArea(areaId: string, premiseId = '1'): Promi
   // ④ 兜底：认不出就一楼，绝不把野 id 发出去换 610
   if (floor && FLOOR_AREA_ID[floor]) return FLOOR_AREA_ID[floor];
   return Object.values(FLOOR_AREA_ID).includes(raw) ? raw : (FLOOR_AREA_ID['一楼'] ?? raw);
+}
+
+/**
+ * 给一个 areaId，返回「该层依次要试的 id 列表」。
+ * 馆站对未开放的房间回 code=610（不是空列表），所以必须能换下一个房间重试。
+ */
+export function areaCandidates(areaId: string): string[] {
+  const floor = floorFromAreaId(String(areaId ?? '').trim());
+  const alts = floor ? FLOOR_AREA_ALTS[floor] : undefined;
+  const head = floor && FLOOR_AREA_ID[floor] ? [FLOOR_AREA_ID[floor] as string] : [String(areaId ?? '')];
+  const out = [...head, ...(alts ?? [])].filter((x) => x && x !== 'undefined');
+  return [...new Set(out)];
 }
 
 export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
