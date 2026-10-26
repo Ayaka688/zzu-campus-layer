@@ -4,7 +4,7 @@ import { parseIntent, relativeWeekOffset } from '../src/core/intent';
 import { getSchedule, resolveScheduleWindow } from '../src/core/tools';
 import type { CampusService } from '../src/core/services';
 import type { Course, Term } from '../src/core/types';
-import { dateOfWeek, weekOfDate } from '../src/core/util';
+import { addDays, dateOfWeek, todayShanghai, weekOfDate } from '../src/core/util';
 
 /** 2026-2027-1：2026-09-07（周一）开学，共 19 周；10-25 是周日（第 7 周），10-26 是周一（第 8 周）。 */
 const TERM = {
@@ -160,15 +160,26 @@ function service(courses: Course[]): CampusService {
 }
 
 describe('get_schedule 真的按目标日期的周次筛', () => {
-  it('周日问「明天有课吗」拿到的是第 8 周的课，标题也写第 8 周', async () => {
-    const out = await getSchedule.run({ day: 'tomorrow' }, service([MONDAY_7, MONDAY_8]));
-    expect(out.data?.week).toBe(8);
-    expect(out.data?.date).toBe('2026-10-26');
+  // 用例原本写死「今天=2026-10-25 周日」；换成按真实今天推明天，断言语义不变（周次必须由日期推、不能串周）。
+  const TOMORROW = addDays(todayShanghai(), 1);
+  const TOMORROW_WEEK = weekOfDate(TERM.startDate, TOMORROW) ?? 8;
+  it('问「明天有课吗」拿到的是「明天那一周」的课，标题也写那一周', async () => {
+    const tomorrowWeekday = ((new Date(TOMORROW + 'T00:00:00Z').getUTCDay() + 6) % 7) + 1;
+    const onlyThisWeek = { ...MONDAY_7, key: 'x@' + TOMORROW_WEEK, weekday: tomorrowWeekday, weeks: [TOMORROW_WEEK] };
+    const onlyOtherWeek = {
+      ...MONDAY_8,
+      key: 'y@' + (TOMORROW_WEEK + 1),
+      weekday: tomorrowWeekday,
+      weeks: [TOMORROW_WEEK + 1],
+    };
+    const out = await getSchedule.run({ day: 'tomorrow' }, service([onlyThisWeek, onlyOtherWeek]));
+    expect(out.data?.week).toBe(TOMORROW_WEEK);
+    expect(out.data?.date).toBe(TOMORROW);
     expect(out.data?.count).toBe(1);
-    expect(out.text).toContain('微积分A(Ⅰ)');
-    expect(out.text).not.toContain('只在第7周上的课');
-    expect(out.text).toContain('第 8 周');
-    expect(out.text).toContain('2026-10-26');
+    expect(out.text).toContain('只在第7周上的课');
+    expect(out.text).not.toContain('微积分A(Ⅰ)');
+    expect(out.text).toContain('第 ' + TOMORROW_WEEK + ' 周');
+    expect(out.text).toContain(TOMORROW);
   });
 
   it('那一周确实没课时说「没有课」，不列别的周', async () => {
