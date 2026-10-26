@@ -255,7 +255,7 @@ export const TOOL_SPECS: ToolSpec[] = [
       parameters: {
         type: 'object',
         properties: {
-          areaId: { type: 'string', description: '区域 id（来自 library_seats 返回的 premises[].id 或 floors[].id，例如 "3"）' },
+          areaId: { type: 'string', description: '区域 id（来自 library_seats 返回的 premises[].id 或 floors[].id，例如 "3"）areaId 直接传中文楼层（一楼/二楼/三楼/四楼）或房间名（如「语言文史书库」），不要自己编数字 id。' },
           date: { type: 'string', description: '日期 YYYY-MM-DD' },
           room: { type: 'string', description: '房间名（可选）。用户点名某一间自习室/区时填，例如「A 区」；只说「二楼」就不要填，留给工具列出全部房间' },
         },

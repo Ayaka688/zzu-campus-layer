@@ -1,3 +1,21 @@
+/* 实测自页面地址栏：id → 房间名（回答里用它，别再显示「区域 8」） */
+export const AREA_NAMES: Record<string, string> = {
+  '3': '一楼大厅',
+  '8': '工程与信息技术书库-1',
+  '9': '工程与信息书库-2',
+  '11': '社会科学书库-1',
+  '12': '社会科学书库-2',
+  '13': '语言文史书库',
+  '14': '三楼西大厅',
+  '15': '三楼中',
+  '16': '三楼东大厅',
+  '17': '自然与外文书库',
+  '18': '电子阅览室',
+  '19': '四楼西大厅',
+  '20': '四楼东大厅',
+  '76': '期刊阅览室',
+};
+
 /**
  * 图书馆空间预约（`order.lib.zzu.edu.cn`）的**免登录**部分。
  *
@@ -289,6 +307,22 @@ export async function resolveLibraryArea(areaId: string, premiseId = '1'): Promi
  * 给一个 areaId，返回「该层依次要试的 id 列表」。
  * 馆站对未开放的房间回 code=610（不是空列表），所以必须能换下一个房间重试。
  */
+const AREA_IDS_BY_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(AREA_NAMES).map(([id, name]) => [name, id]),
+);
+
+export function areaIdByName(text: string): string | undefined {
+  const t = String(text ?? '').trim();
+  if (!t) return undefined;
+  if (AREA_IDS_BY_NAME[t]) return AREA_IDS_BY_NAME[t];
+  const hit = Object.entries(AREA_NAMES).find(([, name]) => name.includes(t) || t.includes(name));
+  return hit ? hit[0] : undefined;
+}
+
+export function areaNameOf(id: string): string | undefined {
+  return AREA_NAMES[String(id ?? '').trim()];
+}
+
 export function areaCandidates(areaId: string): string[] {
   const floor = floorFromAreaId(String(areaId ?? '').trim());
   const alts = floor ? FLOOR_AREA_ALTS[floor] : undefined;
@@ -829,7 +863,7 @@ export function renderSeatMap(m: LibSeatMap, opts: { limit?: number } = {}): str
   const multi = rooms.length > 1;
   const area = m.areaName ? ` · ${m.areaName}` : '';
   const freeSeats = m.seats.filter((s) => s.free);
-  const meta = [m.date ? `日期 ${m.date}` : '', m.areaName ? m.areaName : m.areaId ? `区域 ${m.areaId}` : '']
+  const meta = [m.date ? `日期 ${m.date}` : '', m.areaName ? m.areaName : m.areaId ? (AREA_NAMES[m.areaId] || `区域 ${m.areaId}`) : '']
     .filter(Boolean)
     .join(' · ');
   rows.push(`**图书馆座位图${area}**`, meta ? `${meta}\n` : '');

@@ -11,7 +11,7 @@ declare const __APP_VERSION__: string;
  * 找不到标签页不是错误，而是「这条路现在不能用」——调用方要能优雅降级。
  */
 
-import { resolveLibraryArea, resolveLibraryDate, areaCandidates } from './library';
+import { resolveLibraryArea, resolveLibraryDate, areaCandidates, areaIdByName, areaNameOf } from './library';
 import { parseSeatMap, type LibSeatMap } from './library';
 import type { BookOutcome } from './libBook';
 
@@ -143,6 +143,9 @@ export async function readLibrarySeats(args: {
 }): Promise<
   LibTabResult<LibSeatMap & { tried: string[]; raw?: unknown; diag?: string }>
 > {
+  // BY_NAME_LIFTED：允许直接传「语言文史书库」这种房间名
+  args = { ...args, areaId: areaIdByName(args.areaId) ?? args.areaId };
+
   // DATE_CLAMP：座位图也只用服务端认的那两天（余量链路早就夹过，这里补上）
   {
     const fixed = (await resolveLibraryDate(args.date)).date;
@@ -196,6 +199,7 @@ export async function readLibrarySeats(args: {
       data: {
         seats,
         areaId: id,
+        areaName: areaNameOf(id),
         tried: triedIds,
         diag: `date=${day} ${describePayload(outer.raw)}` + (day !== args.date ? '（今天已过可预约时间，下面是明天的）' : ''),
       },
