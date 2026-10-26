@@ -126,7 +126,7 @@ function bridgeNativeSeats(areaId: string, date: string): Promise<string> | null
     const timer = setTimeout(() => {
       delete w.__libSeatWaiters![reqId];
       reject(new Error('图书馆接口超时（20 秒没回）'));
-    }, 20_000);
+    }, 120_000);
     w.__libSeatWaiters![reqId] = (json: string) => {
       clearTimeout(timer);
       resolve(json);

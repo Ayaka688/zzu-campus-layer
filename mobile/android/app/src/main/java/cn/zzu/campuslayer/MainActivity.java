@@ -30,6 +30,10 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
 
     private static final int REQ_LIB_LOGIN = 3002;
+    /** 等登录完成后要补答的那次座位查询（没有登录态时先挂起，不要立刻回错误） */
+    private String pendingSeatArea = null;
+    private String pendingSeatDate = null;
+    private String pendingSeatReq = null;
     private static final int REQ_LIB_BOOK = 3003;
     private boolean renewAsked = false;
     private boolean renewing = false;
@@ -147,11 +151,10 @@ public class MainActivity extends Activity {
             web.post(new Runnable() {
                 @Override public void run() {
             if (!LibSeatClient.loggedIn(MainActivity.this)) {
-                String js = "window.__libSeats&&window.__libSeats("
-                        + org.json.JSONObject.quote(reqId) + ","
-                        + org.json.JSONObject.quote("{\"ok\":false,\"error\":\"还没登录图书馆：点右上角菜单里的「登录图书馆」，在打开的页面里用学号登录一次，回来再问\"}")
-                        + ")";
-                web.evaluateJavascript(js, null);
+                // 先不回答：等这次登录完成后，用同一个 reqId 把座位表补答回去。
+                pendingSeatArea = areaId;
+                pendingSeatDate = date;
+                pendingSeatReq = reqId;
                 openLibraryLogin();
                 return;
             }
@@ -333,7 +336,22 @@ public class MainActivity extends Activity {
 
         if (requestCode == REQ_LIB_LOGIN) {
             if (resultCode == RESULT_OK) {
-                Toast.makeText(this, "图书馆登录成功，之后可以直接问座位号", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "图书馆登录成功，正在取座位表…", Toast.LENGTH_SHORT).show();
+            }
+            final String pArea = pendingSeatArea;
+            final String pDate = pendingSeatDate;
+            final String pReq = pendingSeatReq;
+            pendingSeatArea = null;
+            pendingSeatDate = null;
+            pendingSeatReq = null;
+            if (pReq != null && LibSeatClient.loggedIn(this)) {
+                LibSeatClient.fetchAsync(web, this, pArea, pDate, pReq);
+            } else if (pReq != null) {
+                String js = "window.__libSeats&&window.__libSeats("
+                        + org.json.JSONObject.quote(pReq) + ","
+                        + org.json.JSONObject.quote("{\"ok\":false,\"error\":\"图书馆登录没拿到票据：请重开「登录图书馆」，登录后停留两秒再退回\"}")
+                        + ")";
+                web.evaluateJavascript(js, null);
             }
             return;
         }
