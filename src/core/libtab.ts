@@ -149,8 +149,8 @@ export async function readLibrarySeats(args: {
   }
   // 安卓壳：走原生桥（原生 HTTP 不受 CORS / 混合内容限制）
   // 同层可能有多个房间：610 = 该房间当天未开放，挨个试，别再原样把野 id 发出去。
-  const hasBridge = typeof window !== 'undefined' && !!(window as any).CampusNotify && typeof (window as any).CampusNotify.libSeats === 'function';
-  const cands = hasBridge ? areaCandidates(args.areaId) : [];
+  // 桥在不在由 bridgeNativeSeats() 自己判断（没有桥它返回 null，循环直接 break 落到网页路径）
+  const cands = areaCandidates(args.areaId);
   const triedIds: string[] = [];
   let bridgeErr = '';
   for (const id of cands) {
