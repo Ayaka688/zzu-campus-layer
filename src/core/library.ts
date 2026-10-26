@@ -192,7 +192,7 @@ export async function resolveLibraryDate(date?: string): Promise<{ date: string;
  *   一楼 2（大厅，parentId=馆）、二楼 72（工程与信息技术书库-1）、三楼 52、四楼 53。
  */
 /* 同一层的其它可预约房间（610 = 该房间当天未开放时，挨个试下一个） */
-const FLOOR_AREA_ALTS: Record<string, string[]> = {
+export const FLOOR_AREA_ALTS: Record<string, string[]> = {
   // 实测自页面 URL：#/seat/appointment?id=<该房间 id>
   一楼: ['3', '2', '71', '61'],
   二楼: ['8', '9', '11', '12', '72', '24', '4'],

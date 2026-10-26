@@ -4,7 +4,7 @@ import { PORTAL_SERVICES, matchServices } from './catalog';
 import { coursesToIcs } from './ics';
 import { resolvePlace, roomInPlace } from './place';
 import { planStudy, renderStudyPlan } from './study';
-import { librarySeatUrl, pickRoom, resolveLibraryDate, seatMapDataUri, areaIdByName, FLOOR_AREA_ID } from './library';
+import { librarySeatUrl, pickRoom, resolveLibraryDate, seatMapDataUri, areaIdByName, FLOOR_AREA_ID, FLOOR_AREA_ALTS, areaNameOf } from './library';
 import { renderCard, renderCourseTable, renderFreeRooms, renderGrades, renderLibrarySeats, renderPlanProgress, renderSeatMap, renderTodos } from './render';
 import { readLibrarySeats } from './libtab';
 import { addDays, dateOfWeek, todayShanghai, weekOfDate, weekdayOf } from './util';
@@ -516,6 +516,44 @@ export const librarySeatMapTool: ToolDefinition<{
   }),
   async run(args) {
     const area = resolveLibraryArea(args);
+
+    /* 没点名房间、但知道楼层时：把这一层的房间逐个读一遍，别只读第一个 */
+    if (!args.room && args.floor) {
+      const ids: string[] = [...new Set(FLOOR_AREA_ALTS[args.floor] ?? [])];
+      if (ids.length > 1) {
+        const rows: string[] = [];
+        let firstImage: { image: string; areaName: string } | null = null;
+        for (const id of ids) {
+          const one = await readLibrarySeats({ areaId: id, date: args.date });
+          const label = areaNameOf(id) ?? `区域 ${id}`;
+          if (!one.ok || !one.data || !one.data.seats.length) {
+            const why = (one.error ?? '读不到').replace(/^[^：]*：/, '').slice(0, 40);
+            rows.push(`- ${label}（${id}）：${why}`);
+            continue;
+          }
+          const free = one.data.seats.filter((x) => x.free).length;
+          rows.push(`- **${label}**（${id}）：${one.data.total ?? one.data.seats.length} 座，空 ${free}`);
+          if (!firstImage) {
+            const uri = seatMapDataUri(one.data);
+            if (uri) firstImage = { image: uri, areaName: one.data.areaName ?? label };
+          }
+        }
+        const head = `${args.date} ${args.floor} · 共 ${ids.length} 间`;
+        const tail =
+          '\n要哪一间的座位图就说名字（例如「二楼工程与信息书库-2 座位图」），我再只画那一间。';
+        return {
+          text: `${head}\n\n${rows.join('\n')}${tail}`,
+          data: {
+            date: args.date,
+            floor: args.floor,
+            rooms: ids,
+            image: firstImage?.image,
+            imageAlt: firstImage ? `${firstImage.areaName} 座位图（未点名的默认图）` : undefined,
+          },
+        };
+      }
+    }
+
     const res = await readLibrarySeats({ areaId: area, date: args.date });
     if (!res.ok || !res.data) {
       const openUrl = librarySeatUrl(area, args.date);
