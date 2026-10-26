@@ -60,8 +60,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          VER=$(grep -oE 'versionName = "[0-9.]+"' ../../../../build.gradle.kts | head -1 | grep -oE '[0-9.]+')
+          echo "version: $VER"
           cp ./*.apk "${GITHUB_WORKSPACE}/campus-layer-debug.apk"
+          cp ./*.apk "${GITHUB_WORKSPACE}/campus-layer-${VER}.apk"
           cd "${GITHUB_WORKSPACE}"
           gh release view apk-latest >/dev/null 2>&1 || \
             gh release create apk-latest --title "安卓壳（最新构建）" --notes "每次 push 到 main 自动更新。下载 campus-layer-debug.apk 安装；没签名证书，装之前要在系统里允许安装未知来源应用。" --target main
           gh release upload apk-latest campus-layer-debug.apk --clobber
+          gh release upload apk-latest "campus-layer-${VER}.apk" --clobber
