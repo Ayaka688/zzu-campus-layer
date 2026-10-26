@@ -1,3 +1,4 @@
+declare const __APP_VERSION__: string;
 /**
  * 与「图书馆空间预约」页面里的 content script 通信。
  *
@@ -198,12 +199,23 @@ export async function readLibrarySeats(args: {
   }
   // 桥没拿到：把试过的 id 记下来，继续走下面的网页路径（那里还会再试一次）
   if (bridgeErr) console.warn('[lib] 桥试过', triedIds.join('、'), bridgeErr);
+  const cn = typeof window === 'undefined' ? undefined : (window as any).CampusNotify;
+  const bridgeInfo =
+    '[诊断 ' +
+    (typeof __APP_VERSION__ === 'string' ? 'v' + __APP_VERSION__ : 'v?') +
+    ' · 壳桥' + (cn ? '有' : '无') +
+    ' · 方法' + (cn ? '(' + Object.keys(cn).join(',') + ')' : '-') +
+    ' · libSeats' + (cn && typeof cn.libSeats === 'function' ? '✓' : '✗') +
+    ']';
+
   const tab = await findLibraryTab();
   if (!tab?.id) {
+    const tip = bridgeInfo;
     return {
       ok: false,
       error:
-        '图书馆座位图要用那个站自己的登录态，我这边拿不到。三步就能解决：\n1. 点下面「打开座位预约」进那个网站并登录（学校账号）\n2. 登录后回到这里，再说一次「一楼座位图」\n3. 如果你是在手机上（没有装浏览器扩展），那个页面请用系统浏览器打开登录，回来我仍然读不到——手机上只能看馆级余量，座位号需要电脑上的扩展。',
+        tip +
+        '\n图书馆座位图要用那个站自己的登录态，我这边拿不到。三步就能解决：\n1. 点下面「打开座位预约」进那个网站并登录（学校账号）\n2. 登录后回到这里，再说一次「一楼座位图」\n3. 如果你是在手机上（没有装浏览器扩展），那个页面请用系统浏览器打开登录，回来我仍然读不到——手机上只能看馆级余量，座位号需要电脑上的扩展。',
     };
   }
 
