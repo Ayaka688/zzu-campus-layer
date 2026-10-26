@@ -169,6 +169,16 @@ public class MainActivity extends Activity {
                 Toast.makeText(MainActivity.this, "课前提醒已排好", Toast.LENGTH_SHORT).show();
             });
         }
+        /** PWA 面板上的「立即续期」按钮：走这里（壳没有可用的右上角菜单）。 */
+        @android.webkit.JavascriptInterface
+        public void renewLogin() {
+            web.post(new Runnable() {
+                @Override
+                public void run() {
+                    forceRenew();
+                }
+            });
+        }
     }
 
     /**
@@ -273,17 +283,6 @@ public class MainActivity extends Activity {
     }
 
     /** 壳内登录：登录页在 WebView 里跑，拿到票就自动回来（不用复制地址）。 */
-    /** PWA 面板上的「立即续期」按钮：走这里（壳没有可用的右上角菜单）。 */
-    @android.webkit.JavascriptInterface
-    public void renewLogin() {
-        web.post(new Runnable() {
-            @Override
-            public void run() {
-                forceRenew();
-            }
-        });
-    }
-
     /** 菜单「立即续期」：不管剩多久，立刻走一次静默续期，用来当场验证。 */
     private void forceRenew() {
         Toast.makeText(this, "正在后台续期…", Toast.LENGTH_SHORT).show();
