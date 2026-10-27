@@ -1,14 +1,13 @@
-import { fileURLToPath } from 'node:url';
+﻿import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   publicDir: r('./public'),
-  define: { __APP_VERSION__: JSON.stringify('0.2.52') },
-  // 相对 base：产物里的资源引用是相对 HTML 的，
-  // 这样 dist 既可以放域名根（Cloudflare Pages / Netlify），也可以放子路径（GitHub Pages 项目页）。
-  base: './',
+  define: { __APP_VERSION__: JSON.stringify('0.2.53') },
+  // 鐩稿 base锛氫骇鐗╅噷鐨勮祫婧愬紩鐢ㄦ槸鐩稿 HTML 鐨勶紝
+  // 杩欐牱 dist 鏃㈠彲浠ユ斁鍩熷悕鏍癸紙Cloudflare Pages / Netlify锛夛紝涔熷彲浠ユ斁瀛愯矾寰勶紙GitHub Pages 椤圭洰椤碉級銆?  base: './',
   build: {
     outDir: r('./dist'),
     emptyOutDir: true,
