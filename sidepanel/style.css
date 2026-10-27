@@ -886,3 +886,29 @@ body {
 .msg.user .bubble .via {
   color: #5a6880;
 }
+
+/* 长按预约按钮：宋体 + 按住时红色进度条从左端跑到右端 */
+.hold-btn {
+  font-family: 'Songti SC', 'SimSun', 'STSong', 'Noto Serif CJK SC', serif;
+  font-weight: 700;
+  position: relative;
+  overflow: hidden;
+  transition: color .12s ease;
+}
+.hold-btn .fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: linear-gradient(90deg, #b3261e 0%, #e0392b 70%, #ff5a4d 100%);
+  opacity: .9;
+  transition: width .06s linear;
+  pointer-events: none;
+}
+.hold-btn.active {
+  color: #fff;
+  border-color: #b3261e;
+  background: #2a1412;
+}
+.hold-btn .label { position: relative; z-index: 1; }
