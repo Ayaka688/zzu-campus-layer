@@ -103,6 +103,33 @@ function App() {
   useEffect(() => setBooted(true), []);
   /* 在安卓壳里（壳注入了 CampusNotify）登录由原生菜单接管，不需要用户复制地址 */
   const inShell = typeof (window as unknown as { CampusNotify?: unknown }).CampusNotify !== 'undefined';
+
+/* 自动续期：登录态过期/失效时先静默续一次；失败才把用户送到登录面板。
+   续期由壳里的 LoginActivity(silent) 完成，结果经 window.__campusRenew('ok'|'fail') 回来。 */
+type RenewBridge = { renewLogin?: () => void };
+let renewWaiters: Array<(ok: boolean) => void> = [];
+const renewApi = (): RenewBridge | undefined => (window as unknown as { CampusNotify?: RenewBridge }).CampusNotify;
+const canAutoRenew = (): boolean => typeof renewApi()?.renewLogin === 'function';
+function renewOnce(timeoutMs = 45_000): Promise<boolean> {
+  const b = renewApi();
+  if (typeof b?.renewLogin !== 'function') return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    renewWaiters.push((ok) => {
+      clearTimeout(timer);
+      resolve(ok);
+    });
+    try {
+      b.renewLogin?.();
+    } catch {
+      clearTimeout(timer);
+      resolve(false);
+    }
+  });
+}
+const AUTH_LOST_RE = /未登录|没有访问权限|登录态|token\s*(过期|无效|已过期)|已过期|expired|unauthor/i;
+const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
+
   const [paste, setPaste] = useState('');
   const [note, setNote] = useState('');
   const [testing, setTesting] = useState(false);
@@ -132,7 +159,7 @@ function App() {
     setRenewBusy(true);
     setRenewStep('已发出，等壳回话…');
     try {
-      bridge.renewLogin();
+      bridge.renewLogin?.();
     } catch (e) {
       setRenewBusy(false);
       setRenewStep('');
@@ -209,7 +236,7 @@ function App() {
     setNoticeBusy(true);
     setNoticeError('');
     try {
-      const session = await loadSession();
+      let session = await loadSession();
       if (!session.jwxtToken && !session.portalToken) {
         setNoticeError('还没有登录态：点右上角「登录态」导入一次。');
         return;
@@ -330,7 +357,7 @@ function App() {
     setInput('');
     setBusy(true);
     try {
-      const session = await loadSession();
+      let session = await loadSession();
       if (!session.jwxtToken && !session.portalToken) {
         setMessages((m) =>
           trimTranscript([
@@ -342,7 +369,21 @@ function App() {
         setSheet('login');
         return;
       }
-      const res = await ask(question, session, {
+      /* 开销很小：只剩 0 次续期机会时也照样先问一次（用户可能刚在别处续过） */
+      if (jwxt && !jwxt.valid && canAutoRenew()) {
+        setNote('登录态过期了，正在自动续期…');
+        const ok = await renewOnce();
+        setNote(ok ? '续期成功' : '');
+        if (!ok) {
+          /* 续不上就把人送到登录面板，别让他对着报错猜 */
+          setNavDir('fwd');
+          setSheet('login');
+          setNote('自动续期没成功，请重新登录一次');
+        } else {
+          session = await loadSession();
+        }
+      }
+      let res = await ask(question, session, {
         llm,
         // 把最近几轮带上，模型才接得住「那明天呢」这种追问
         history: messages
@@ -350,6 +391,25 @@ function App() {
           .filter((m) => m.text.trim())
           .map((m) => ({ role: m.role, content: m.text })),
       });
+      if (res.error && looksAuthLost(res.text) && canAutoRenew()) {
+        setNote('登录态失效，正在自动续期…');
+        const ok = await renewOnce();
+        if (ok) {
+          session = await loadSession();
+          res = await ask(question, session, {
+            llm,
+            history: messages
+              .slice(-6)
+              .filter((m) => m.text.trim())
+              .map((m) => ({ role: m.role, content: m.text })),
+          });
+          setNote('已续期并重试');
+        } else {
+          setNote('自动续期没成功，请重新登录一次');
+          setNavDir('fwd');
+          setSheet('login');
+        }
+      }
       setMessages((m) =>
         trimTranscript([
           ...m,
@@ -384,6 +444,16 @@ function App() {
       setRenewBusy(false);
       setRenewStep('');
       setRenewNote(r === 'ok' ? 'ok' : 'fail');
+      const ok = /ok/i.test(String(r ?? ''));
+      const waiters = renewWaiters;
+      renewWaiters = [];
+      waiters.forEach((fn) => {
+        try {
+          fn(ok);
+        } catch {
+          /* 单个等待者出错不影响其它人 */
+        }
+      });
       void refresh();
     };
     w.__campusImport = async (raw: string): Promise<string> => {

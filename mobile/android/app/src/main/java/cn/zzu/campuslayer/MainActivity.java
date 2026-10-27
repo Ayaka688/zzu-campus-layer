@@ -361,6 +361,14 @@ public class MainActivity extends Activity {
         String payload = data.getStringExtra("payload");
         if (payload == null || payload.trim().isEmpty()) {
             if (renewing) {
+            // 续不上了：直接把人送到学校登录页（静默失败最常见的原因是 TGT 也过期）
+            renewing = false;
+            boolean autoFallbackLogin = resultCode != RESULT_OK;
+            if (autoFallbackLogin) {
+                Toast.makeText(this, "自动续期没成功，请在学校登录页重新登录一次", Toast.LENGTH_LONG).show();
+                startActivityForResult(new Intent(this, LoginActivity.class), REQ_LOGIN);
+                return;
+            }
                 renewing = false;
                 Toast.makeText(this, "续期失败：没拿到票，可能要在设置里重登一次", Toast.LENGTH_LONG).show();
                 web.evaluateJavascript("window.__campusRenew&&window.__campusRenew('fail')", null);
