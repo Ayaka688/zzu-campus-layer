@@ -307,3 +307,26 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 | 17 | 合并 PR #1 后全量回归 | `tsc` 0 错、**303 passed / 12 skipped**（25 文件）；合并前 PR 自己的 CI 是 `action_required`（fork 首贡献没人点 Approve），等于这 3417 行没被人验证过 |
 | 18 | 合并后收尾（`b5a22db`） | ①`scripts/e2e.mjs:314` 的 `search_notice` → `find_notices`（CI 不跑 e2e，不改会静默失效）；②`public/content/jwxt.js` 只认 `iss === 'cas.s.zzu.edu.cn'` 的票（PR 给 jwxt 开了 `all_frames:true`，防止把 iframe 里别人的票当登录态）；③补测试后 **305 passed / 12 skipped** |
 | 19 | 课前提醒 | `remind.test.ts` 5 例（单节 / 连堂合并 / 跨午不合并 / 过点不弹 / 教学周过滤）⇒ **244 passed**；`android` workflow 出 APK（artifact `campus-layer-debug-apk`） |
+
+## 9.3 验收补充（2026-10-27，前端 0.2.52）
+
+以下各条均已落地并有对应单测/实网验证；前表（§9 / §9.1 / §9.2）未覆盖本轮改动。
+
+| # | 能力 / 修复 | 验收依据 |
+| --- | --- | --- |
+| 21 | 图书馆座位工具改**语义参数**：`floor: '一楼'\|'二楼'\|'三楼'\|'四楼'` + `room`，不再暴露数字 id | `test/libarea.test.ts` 断言 `floor:'二楼'` 通过、`floor:'五楼'` 被 schema 拒、`room:'语言文史书库'` 通过 |
+| 22 | 楼层 → 房间 id 用实测表：一楼 `3`；二楼 `8/9/11/12`；三楼 `13–17`；四楼 `18/19/20/76` | 用户从图书馆页面地址栏逐个报的真实 id；`FLOOR_AREA_ID` / `FLOOR_AREA_ALTS` / `AREA_NAMES` |
+| 23 | 问**楼层**→ 整层展开：每间一行余量 + 每间一张座位图（`data.images`，UI 逐张渲染并标房间名） | 实机：`今天二楼座位图` 返回 4 行 + 4 张图 |
+| 24 | 问**房间**→ 只读那一间、只画那一张。三级判据：`room` 字段 → 用户原话房间名（**前 4 字**模糊匹配）→ `areaId` 已是具体房间即不展开 | `src/core/agent.ts` 的 `ROOM_HINT`；`src/core/tools.ts` 的 `isSpecificRoom` |
+| 25 | 修三个「id 被吞」的真 bug：①`areaCandidates` 把楼层默认间排在前面 ②`libtab` 把具体房间 id 归一成楼层默认间 ③楼层备选表混入楼层级旧 id（多出「区域 72」这类未命名项） | 修前整层房间余量完全相同（都读到第一间）；修后各间数字互不相同 |
+| 26 | 日期不再信模型：`/v4/space/index` 被混合内容拦下时不回退到模型给的旧日期，改为 **Asia/Shanghai 本地算**今天/明天 | `resolveLibraryDate()`；馆站只认今明两天，其余一律 `code=610` |
+| 27 | 错误语义分开：`code=610`（该区域当天不可约）与 `code=10001`（被其它设备顶掉）各自人话；桥路径带「今天不行试明天」兜底 | `LibSeatClient.describePayload` + `libtab` 文案 |
+| 28 | 长按预约按钮：**宋体** + 按住后红色进度条自左向右跑满 1.2 秒才提交，松手取消 | `pwa/style.css` 的 `.hold-btn` / `.fill` / `.active` |
+| 29 | 蓝绿（teal）配色：模型气泡由白色 `--panel` 改为同族墨绿不透明面、正文近白、去掉半透明 | `html[data-theme='teal'] .bubble` 一组覆盖 |
+| 30 | 更新链路：`pwa-sw.js` 缓存名 `campus-layer-v8` + `skipWaiting`/`clients.claim`；注册 `{ updateViaCache: 'none' }` + `reg.update()` + 新 SW 就绪后自动 reload；壳在版本号变化时 `web.clearCache(true)` | 线上核对：`assets/pwa-*.js` 内含当前版本号；壳杀进程重开后版本号前进 |
+
+**本轮仍未做（明确记录）**
+- 图书馆座位图依赖该站自身登录态（与学校 CAS 是两套账号），且**同一时间只允许一台设备在线**；
+- 一层一次问会发 4–5 次请求（每间一次），手机 2–4 秒；
+- 下单（`/v4/space/confirm` 的 AES 加密）不复刻，止步于「长按 → 由页面自己发」；
+- `code=610` 的真实触发条件仍有不确定性（可能同时受区域开放时间影响），当前只用「日期夹紧 + 明天兜底」缓解。
