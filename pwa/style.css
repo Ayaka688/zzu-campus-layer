@@ -1648,3 +1648,29 @@ html:not([data-theme='ink']) .bubble {
   background: #2a1412;
 }
 .hold-btn .label { position: relative; z-index: 1; }
+
+/* teal（蓝绿）主题：模型气泡原来落在 --panel 的白色上，再叠 opacity 就显得字发灰。
+   这里把气泡改成和底色同族的墨绿面，正文用接近白的浅色，并禁用降透明度。 */
+html[data-theme='teal'] .bubble.assistant,
+html[data-theme='teal'] .bubble {
+  background: #10282c !important;
+  border: 1px solid #1d4a52 !important;
+  color: #e9f4f3 !important;
+  opacity: 1 !important;
+}
+
+html[data-theme='teal'] .bubble * {
+  color: #e9f4f3 !important;
+  opacity: 1 !important;
+}
+
+html[data-theme='teal'] .bubble.user {
+  background: #0e8a7a !important;
+  color: #f3fffd !important;
+}
+
+html[data-theme='teal'] .via,
+html[data-theme='teal'] .bubble em,
+html[data-theme='teal'] .bubble .dim {
+  color: #7fc7c0 !important;
+}

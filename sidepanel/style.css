@@ -912,3 +912,13 @@ body {
   background: #2a1412;
 }
 .hold-btn .label { position: relative; z-index: 1; }
+
+/* teal 气泡可读性：不透明的墨绿面板 + 高对比正文 */
+html[data-theme='teal'] .bubble {
+  background: #10282c !important;
+  border: 1px solid #1d4a52 !important;
+  color: #e9f4f3 !important;
+  opacity: 1 !important;
+}
+html[data-theme='teal'] .bubble * { color: #e9f4f3 !important; opacity: 1 !important; }
+html[data-theme='teal'] .bubble.user { background: #0e8a7a !important; }
