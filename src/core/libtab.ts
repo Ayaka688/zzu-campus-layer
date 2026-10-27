@@ -149,7 +149,10 @@ export async function readLibrarySeats(args: {
   // DATE_CLAMP：座位图也只用服务端认的那两天（余量链路早就夹过，这里补上）
   {
     const fixed = (await resolveLibraryDate(args.date)).date;
-    const areaFixed = await resolveLibraryArea(args.areaId);
+    /* 明确给了已知房间 id（如二楼 9）就用它自己；只有认不出的 id 才归一成楼层默认间，
+       否则整层所有房间都会读成第一间 */
+    const rawArea = String(args.areaId ?? '').trim();
+    const areaFixed = areaNameOf(rawArea) ? rawArea : await resolveLibraryArea(rawArea);
     args = { ...args, date: fixed, areaId: areaFixed };
   }
   // 安卓壳：走原生桥（原生 HTTP 不受 CORS / 混合内容限制）
