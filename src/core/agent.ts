@@ -125,7 +125,12 @@ export function applyTextHints(name: string, args: Record<string, unknown>, text
   if (/library_seat_map|book_library_seat/.test(name)) {
     const roomHit = Object.entries(AREA_NAMES)
       .map(([id, name]) => ({ id, name }))
-      .filter((it) => it.name.length >= 3 && text.includes(it.name))
+      .filter(
+        (it) =>
+          it.name.length >= 3 &&
+          (text.includes(it.name) ||
+            (it.name.length >= 4 && text.includes(it.name.slice(0, 4)))),
+      )
       .sort((a, b) => b.name.length - a.name.length)[0];
     if (roomHit) {
       args = { ...args, room: roomHit.name, areaId: roomHit.id };

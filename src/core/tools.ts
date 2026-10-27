@@ -519,7 +519,10 @@ export const librarySeatMapTool: ToolDefinition<{
 
     /* 没点名房间、但能确定楼层时：把这一层的房间逐个读一遍，别只读第一个 */
     const floorName = (args.floor ?? floorOfArea(args.areaId ?? '')) as FloorName | undefined;
-    if (!args.room && floorName) {
+    /* areaId 若已指向"某间具体房间"（如二楼 9），就按单间处理，绝不整层展开 */
+    const givenId = String(args.areaId ?? '').trim();
+    const isSpecificRoom = Boolean(givenId) && Boolean(areaNameOf(givenId)) && givenId !== FLOOR_AREA_ID[floorName ?? ''];
+    if (!args.room && floorName && !isSpecificRoom) {
       const ids: string[] = [...new Set(FLOOR_AREA_ALTS[floorName] ?? [])];
       if (ids.length > 1) {
         const rows: string[] = [];
