@@ -1674,22 +1674,3 @@ html[data-theme='teal'] .bubble em,
 html[data-theme='teal'] .bubble .dim {
   color: #7fc7c0 !important;
 }
-
-/* ===== 第四套：黑 + 紫红（magenta）===== */
-html[data-theme='magenta'] {
-  --bg: #180a12;
-  --panel: #22101a;
-  --text: #f7e9f0;
-  --dim: #b98aa6;
-  --accent: #b4235f;
-  color-scheme: dark;
-}
-html[data-theme='magenta'] .bubble {
-  background: #22101a !important;
-  border: 1px solid #3d1c2c !important;
-  color: #f7e9f0 !important;
-  opacity: 1 !important;
-}
-html[data-theme='magenta'] .bubble * { color: #f7e9f0 !important; opacity: 1 !important; }
-html[data-theme='magenta'] .bubble.user { background: #b4235f !important; color: #fff5f9 !important; }
-html[data-theme='magenta'] .via { color: #d1699a !important; }
