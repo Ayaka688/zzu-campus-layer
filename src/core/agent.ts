@@ -1,4 +1,5 @@
 import { CampusService, CampusSession } from './services';
+import { AREA_NAMES } from './library';
 import { extractRoomName, helpText, parseIntent, relativeDayOffset, relativeWeekOffset, type Intent } from './intent';
 import {
   classifyIntentVerbose,
@@ -119,6 +120,19 @@ export function applyTextHints(name: string, args: Record<string, unknown>, text
       args = next;
     }
   }
+  /* ROOM_HINT：用户点名了某间房（如"工程与信息书库-2"）→ 固定成单间查询，
+     不许再带 floor（否则工具会按"整层展开"返回所有房间的图） */
+  if (/library_seat_map|book_library_seat/.test(name)) {
+    const roomHit = Object.entries(AREA_NAMES)
+      .map(([id, name]) => ({ id, name }))
+      .filter((it) => it.name.length >= 3 && text.includes(it.name))
+      .sort((a, b) => b.name.length - a.name.length)[0];
+    if (roomHit) {
+      args = { ...args, room: roomHit.name, areaId: roomHit.id };
+      delete (args as Record<string, unknown>).floor;
+    }
+  }
+
 
 
   const out = { ...args };
