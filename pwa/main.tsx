@@ -77,13 +77,14 @@ function pushNote(text: string) {
 }
 
 /** 三套配色。teal 是后加的「蓝绿」：和 ink 共用深色骨架，只换一组变量。 */
-type ThemeName = 'cream' | 'ink' | 'teal';
+type ThemeName = 'cream' | 'ink' | 'teal' | 'magenta';
 
 /** 状态栏/地址栏跟着配色走，免得换完主题上边还留着旧颜色。 */
 const THEME_COLOR: Record<ThemeName, string> = {
   cream: '#f4ebd7',
   ink: '#0b1220',
   teal: '#07191a',
+  magenta: '#180a12',
 };
 
 function syncThemeMeta(next: ThemeName): void {
@@ -177,7 +178,7 @@ function App() {
     setLlm(await getLlmSettings());
     setNoticePrefsState(await getNoticePrefs());
       const themePref = await getKV().get<string>('theme');
-      const t: ThemeName = themePref === 'cream' || themePref === 'teal' ? themePref : 'ink';
+      const t: ThemeName = themePref === 'cream' || themePref === 'teal' || themePref === 'magenta' ? themePref : 'ink';
       setTheme(t);
       document.documentElement.dataset.theme = t;
       syncThemeMeta(t);
@@ -753,6 +754,7 @@ function App() {
               <button type="button" class={theme === 'cream' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('cream')}>米白</button>
               <button type="button" class={theme === 'ink' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('ink')}>藏青</button>
               <button type="button" class={theme === 'teal' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('teal')}>蓝绿</button>
+              <button type="button" class={theme === 'magenta' ? 'ghost on' : 'ghost'} onClick={() => void applyTheme('magenta')}>紫红</button>
             </div>
             <label class="row" style="align-items:center;gap:8px">
             <input
