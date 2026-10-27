@@ -523,7 +523,7 @@ export const librarySeatMapTool: ToolDefinition<{
       const ids: string[] = [...new Set(FLOOR_AREA_ALTS[floorName] ?? [])];
       if (ids.length > 1) {
         const rows: string[] = [];
-        let firstImage: { image: string; areaName: string } | null = null;
+        const images: { areaName: string; image: string }[] = [];
         for (const id of ids) {
           const one = await readLibrarySeats({ areaId: id, date: args.date });
           const label = areaNameOf(id) ?? `区域 ${id}`;
@@ -534,10 +534,8 @@ export const librarySeatMapTool: ToolDefinition<{
           }
           const free = one.data.seats.filter((x) => x.free).length;
           rows.push(`- **${label}**（${id}）：${one.data.total ?? one.data.seats.length} 座，空 ${free}`);
-          if (!firstImage) {
-            const uri = seatMapDataUri(one.data);
-            if (uri) firstImage = { image: uri, areaName: one.data.areaName ?? label };
-          }
+          const uri = seatMapDataUri(one.data);
+          if (uri) images.push({ areaName: one.data.areaName ?? label, image: uri });
         }
         const head = `${args.date} ${floorName} · 共 ${ids.length} 间`;
         const tail =
@@ -548,8 +546,9 @@ export const librarySeatMapTool: ToolDefinition<{
             date: args.date,
             floor: floorName,
             rooms: ids,
-            image: firstImage?.image,
-            imageAlt: firstImage ? `${firstImage.areaName} 座位图（未点名的默认图）` : undefined,
+            images,
+            image: images[0]?.image,
+            imageAlt: images[0] ? `${images[0].areaName} 座位图` : undefined,
           },
         };
       }

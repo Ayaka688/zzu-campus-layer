@@ -525,7 +525,14 @@ function App() {
               {m.role === 'assistant' && !m.error && m.tool === 'get_schedule' && <CampusMap />}
               {m.role === 'assistant' && !m.error && typeof m.data?.image === 'string' && (
                 <figure class="seatmap">
-                  <img src={String(m.data.image)} alt={String(m.data.imageAlt ?? '座位平面图')} />
+                  {Array.isArray((m.data as any).images) && (m.data as any).images.length > 1
+              ? ((m.data as any).images as { areaName: string; image: string }[]).map((it, i) => (
+                  <span className="seatmap-item" key={i}>
+                    <img src={it.image} alt={`${it.areaName} 座位图`} />
+                    <em>{it.areaName}</em>
+                  </span>
+                ))
+              : <img src={String(m.data.image)} alt={String(m.data.imageAlt ?? '座位平面图')} />}
                   <figcaption>绿点是空的 · 灰点已占（按页面坐标还原，不是官方图）</figcaption>
                 </figure>
               )}
