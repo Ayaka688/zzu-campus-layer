@@ -1,13 +1,16 @@
-﻿import { fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   publicDir: r('./public'),
-  define: { __APP_VERSION__: JSON.stringify('0.2.56') },
-  // 鐩稿 base锛氫骇鐗╅噷鐨勮祫婧愬紩鐢ㄦ槸鐩稿 HTML 鐨勶紝
-  // 杩欐牱 dist 鏃㈠彲浠ユ斁鍩熷悕鏍癸紙Cloudflare Pages / Netlify锛夛紝涔熷彲浠ユ斁瀛愯矾寰勶紙GitHub Pages 椤圭洰椤碉級銆?  base: './',
+  define: { __APP_VERSION__: JSON.stringify('0.2.57') },
+  // 相对 base：产物里的资源引用是相对 HTML 的。
+  // 这样 dist 既能放域名根路径（Cloudflare Pages / Netlify），也能放子路径（GitHub Pages 项目页）。
+  // 注意：这条必须独占一行，曾被 PowerShell 覆盖把换行吃掉、注释把 base 吞掉，
+  // 结果构建产物变成绝对路径 /assets/... → 子路径部署时 404 → 白屏。
+  base: './',
   build: {
     outDir: r('./dist'),
     emptyOutDir: true,
