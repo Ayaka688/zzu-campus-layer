@@ -5,7 +5,7 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   publicDir: r('./public'),
-  define: { __APP_VERSION__: JSON.stringify('0.2.55') },
+  define: { __APP_VERSION__: JSON.stringify('0.2.56') },
   // 鐩稿 base锛氫骇鐗╅噷鐨勮祫婧愬紩鐢ㄦ槸鐩稿 HTML 鐨勶紝
   // 杩欐牱 dist 鏃㈠彲浠ユ斁鍩熷悕鏍癸紙Cloudflare Pages / Netlify锛夛紝涔熷彲浠ユ斁瀛愯矾寰勶紙GitHub Pages 椤圭洰椤碉級銆?  base: './',
   build: {

@@ -1,76 +1,45 @@
-/* 手机 PWA 的离线壳：只缓存本页自身与静态资源，绝不碰学校接口。
- *
- * 路径全部相对 SW 自己的 scope（`/pwa/`），这样部署到域名根或子路径都能用：
- * 例如 `https://x.github.io/campus-layer/pwa/pwa-sw.js` → scope 是 `/campus-layer/pwa/`。
- *
- * 策略（2026-10-23 修）：**index.html 走网络优先**，assets 走缓存优先。
- * 原因：assets 文件名带 hash 不会变内容，缓起来最划算；但 index.html 决定这次要用哪套 assets，
- * 一旦被永久缓存，新部署的代码就永远进不来——安卓壳里尤其明显（它就是一个长期不关的 WebView）。
- */
-const CACHE = 'campus-layer-v8';
-const SCOPE = self.registration ? self.registration.scope : '/';
-/*
- * 预缓存清单：只放**仓库里一定存在**的文件。
- * 以前这里还列了 ../map/campus.jpg，但那张地图是学校版权素材、仓库里默认不带，
- * 于是 cache.addAll 整个失败（它是原子的），离线壳一次都没装上过。
- * 现在改成逐个 add + allSettled：缺哪个都不影响其它文件。
- */
-const SHELL = ['index.html', 'pwa.webmanifest', '../icons/icon-192.png', '../icons/icon-512.png'].map(
-  (p) => new URL(p, SCOPE).href,
-);
+/* 校园信息层 PWA service worker
+   设计原则：**不缓存**业务资源，只做「离线兜底 + 极简壳缓存」。
+   原因：壳里长期不关，凡是缓存优先都会出现「部署了但拿不到 / 拿到半套」，
+   最终表现就是白屏；宁可离线时报错，也不要拿着旧 chunk 装新页面。 */
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((c) => Promise.allSettled(SHELL.map((u) => c.add(u))))
-      .catch(() => undefined),
+const SHELL = 'campus-layer-shell-v9';
+const SHELL_FILES = ['./index.html'];
+
+self.addEventListener('install', (e) => {
+  e.waitUntil(
+    caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).catch(() => undefined).then(() => self.skipWaiting()),
   );
-  self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== SHELL).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-  // 只处理自家静态资源；跨域（学校 API）一律原样放行，不进缓存。
-  if (url.origin !== self.location.origin) return;
-  if (event.request.method !== 'GET') return;
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return; // 接口/第三方一律放行
 
-  // 1) 入口文档：网络优先，离线才用缓存（保证拿到最新 assets 清单）
-  const isDocument = url.pathname.endsWith('/pwa/index.html') || url.pathname.endsWith('/pwa/');
-  if (isDocument || event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((res) => {
-          if (res.ok) void caches.open(CACHE).then((c) => c.put(event.request, res.clone()));
-          return res;
-        })
-        .catch(() => caches.match(event.request).then((hit) => hit || caches.match(SHELL[0]))),
-    );
-    return;
-  }
-
-  // 2) 其余静态资源：缓存优先 + 后台更新
-  const isShell = SHELL.includes(url.href) || url.href.includes('/assets/');
-  if (!isShell) return;
-
-  event.respondWith(
-    caches.match(event.request).then((hit) => {
-      const network = fetch(event.request)
-        .then((res) => {
-          if (res.ok) void caches.open(CACHE).then((c) => c.put(event.request, res.clone()));
-          return res;
-        })
-        .catch(() => hit);
-      return hit || network;
+  e.respondWith(
+    fetch(req).catch(async () => {
+      // 网络挂了：文档回退到壳，其它资源尽量回缓存，最后给一个可读的错误
+      const hit = await caches.match(req);
+      if (hit) return hit;
+      if (req.mode === 'navigate') {
+        const shell = await caches.match('./index.html');
+        if (shell) return shell;
+      }
+      return new Response('离线且没有缓存：' + req.url, {
+        status: 503,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      });
     }),
   );
 });

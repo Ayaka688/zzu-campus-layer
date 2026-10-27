@@ -11,7 +11,37 @@
     <link rel="manifest" href="./pwa.webmanifest" />
     <link rel="icon" href="../icons/icon-192.png" />
     <link rel="apple-touch-icon" href="../icons/icon-192.png" />
-  </head>
+  <script>
+    (function () {
+      function show(msg) {
+        if (document.getElementById('boot-error')) return;
+        var d = document.createElement('div');
+        d.id = 'boot-error';
+        d.style.cssText =
+          'position:fixed;left:0;right:0;top:0;z-index:99999;padding:14px 16px;background:#2a1412;color:#ffd9d4;' +
+          'font:14px/1.5 system-ui,sans-serif;white-space:pre-wrap';
+        d.textContent = '页面没能启动：' + msg + '\n\n点这里清缓存后重载';
+        d.onclick = function () {
+          try {
+            if (window.caches) caches.keys().then(function (k) { k.forEach(function (x) { caches.delete(x); }); });
+            if (navigator.serviceWorker) navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); });
+          } catch (e) {}
+          setTimeout(function () { location.replace(location.pathname + '?cachebust=' + Date.now()); }, 300);
+        };
+        document.body ? document.body.appendChild(d) : document.documentElement.appendChild(d);
+      }
+      window.addEventListener('error', function (e) {
+        show((e && e.message) || '脚本错误');
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        show((e && e.reason && (e.reason.message || e.reason)) || '异步错误');
+      });
+      setTimeout(function () {
+        if (!document.querySelector('#app > *') && !document.querySelector('.composer')) show('首屏没有渲染（可能是旧缓存）');
+      }, 6000);
+    })();
+  </script>
+</head>
   <body>
     <div id="app"></div>
     <script type="module" src="./main.tsx"></script>
