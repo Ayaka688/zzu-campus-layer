@@ -324,11 +324,18 @@ export function areaNameOf(id: string): string | undefined {
 }
 
 export function areaCandidates(areaId: string): string[] {
-  const floor = floorFromAreaId(String(areaId ?? '').trim());
-  const alts = floor ? FLOOR_AREA_ALTS[floor] : undefined;
-  const head = floor && FLOOR_AREA_ID[floor] ? [FLOOR_AREA_ID[floor] as string] : [String(areaId ?? '')];
-  const out = [...head, ...(alts ?? [])].filter((x) => x && x !== 'undefined');
+  const exact = String(areaId ?? '').trim();
+  const floor = floorFromAreaId(exact);
+  const head = floor && FLOOR_AREA_ID[floor] ? [FLOOR_AREA_ID[floor] as string] : [];
+  const alts = floor ? (FLOOR_AREA_ALTS[floor] ?? []) : [];
+  /* 用户/模型明确给了 id 时，必须先试它自己，否则整层都会读成默认那一间 */
+  const out = [exact, ...head, ...alts].filter((x) => x && x !== 'undefined');
   return [...new Set(out)];
+}
+
+/** area id → 楼层名（一楼/二楼/…），认不出返回 undefined */
+export function floorOfArea(areaId: string): string | undefined {
+  return floorFromAreaId(String(areaId ?? '').trim()) || undefined;
 }
 
 export async function librarySeats(opts: { date?: string } = {}): Promise<LibrarySeats> {
