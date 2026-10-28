@@ -89,18 +89,17 @@ public class LoginActivity extends Activity {
                 if (harvestUrl(url)) {
                     return;
                 }
-                // 最后兜底：有些落点会把 token 存进 localStorage
+                // 先看 localStorage 里有没有「更长的票」：门户/教务自己种的 idToken 可能是 30 天，
+                // 而 CAS 回跳 URL 上那张只有 8 小时。两者都在时取剩余时间更长的那个。
                 view.evaluateJavascript(SNAPSHOT, value -> {
                     String raw = clean(value);
-                    if (raw.isEmpty()) {
+                    String[] parts = raw.isEmpty() ? new String[0] : raw.split("\n");
+                    String local = parts.length > 1 && isJwt(parts[1]) ? parts[1] : "";
+                    String fromUrl = parts.length > 0 ? ticketPayload(parts[0]) : "";
+                    String best = pickLonger(local, fromUrl);
+                    if (best != null) {
+                        finishWithPayload(best);
                         return;
-                    }
-                    String[] parts = raw.split("\n");
-                    if (parts.length > 0 && harvestUrl(parts[0])) {
-                        return;
-                    }
-                    if (parts.length > 1 && isJwt(parts[1])) {
-                        finishWithPayload(parts[1]);
                     }
                 });
                 startPoll();
@@ -131,9 +130,12 @@ public class LoginActivity extends Activity {
                 }
                 web.evaluateJavascript(SNAPSHOT, value -> {
                     String raw = clean(value);
-                    String[] parts = raw.split("\n");
-                    if (parts.length > 1 && isJwt(parts[1])) {
-                        finishWithPayload(parts[1]);
+                    String[] parts = raw.isEmpty() ? new String[0] : raw.split("\n");
+                    String local = parts.length > 1 && isJwt(parts[1]) ? parts[1] : "";
+                    String fromUrl = parts.length > 0 ? ticketPayload(parts[0]) : "";
+                    String best = pickLonger(local, fromUrl);
+                    if (best != null) {
+                        finishWithPayload(best);
                     }
                 });
                 if (silent) {
@@ -157,9 +159,63 @@ public class LoginActivity extends Activity {
         }, 1500);
     }
 
+    /** 从 JWT 里读 exp/iat，返回有效期小时数；读不到返回 -1。 */
+    private static double ttlHours(String token) {
+        try {
+            String[] p = token.split("\\.");
+            if (p.length < 2) return -1;
+            String body = p[1].replace('-', '+').replace('_', '/');
+            while (body.length() % 4 != 0) body += "=";
+            String json = new String(android.util.Base64.decode(body, android.util.Base64.DEFAULT), "UTF-8");
+            java.util.regex.Matcher me = java.util.regex.Pattern.compile("\"exp\"\\s*:\\s*(\\d+)").matcher(json);
+            java.util.regex.Matcher mi = java.util.regex.Pattern.compile("\"iat\"\\s*:\\s*(\\d+)").matcher(json);
+            if (!me.find()) return -1;
+            long exp = Long.parseLong(me.group(1));
+            long iat = mi.find() ? Long.parseLong(mi.group(1)) : 0;
+            if (iat <= 0) return -1;
+            return (exp - iat) / 3600.0;
+        } catch (Throwable e) {
+            return -1;
+        }
+    }
+
+    /** 现在的票还剩多少小时（用 exp - now）。 */
+    private static double leftHours(String token) {
+        try {
+            String[] p = token.split("\\.");
+            if (p.length < 2) return -1;
+            String body = p[1].replace('-', '+').replace('_', '/');
+            while (body.length() % 4 != 0) body += "=";
+            String json = new String(android.util.Base64.decode(body, android.util.Base64.DEFAULT), "UTF-8");
+            java.util.regex.Matcher me = java.util.regex.Pattern.compile("\"exp\"\\s*:\\s*(\\d+)").matcher(json);
+            if (!me.find()) return -1;
+            long exp = Long.parseLong(me.group(1)) * 1000L;
+            return (exp - System.currentTimeMillis()) / 3600000.0;
+        } catch (Throwable e) {
+            return -1;
+        }
+    }
+
     private static final String SNAPSHOT =
             "(function(){try{return location.href+'\\n'+(localStorage.getItem('idToken')"
             + "||localStorage.getItem('X-Id-Token')||'')}catch(e){return ''}})()";
+
+    /** URL 里的 ticket 是不是 JWT？是就返回"整条 URL"（下游会再解析）。 */
+    private static String ticketPayload(String url) {
+        if (url == null || !url.contains("ticket=")) return "";
+        String tk = url.substring(url.indexOf("ticket=") + 7);
+        int amp = tk.indexOf('&');
+        if (amp >= 0) tk = tk.substring(0, amp);
+        return tk.indexOf('.') > 0 ? url : "";
+    }
+
+    /** 两个候选里选剩余时间更长的；都不行返回 null。 */
+    private static String pickLonger(String local, String fromUrl) {
+        double l = isJwt(local) ? leftHours(local) : -1;
+        double u = fromUrl != null && !fromUrl.isEmpty() ? leftHours(fromUrl) : -1;
+        if (l <= 0 && u <= 0) return null;
+        return l >= u ? local : fromUrl;
+    }
 
     /** 地址里带 ticket / idToken 就当场收工。返回 true 表示已处理。 */
     private boolean harvestUrl(String url) {
