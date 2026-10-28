@@ -317,7 +317,28 @@ public class LoginActivity extends Activity {
         return s.split("\\.").length == 3 && s.length() > 60;
     }
 
+    /** 诊断：收工前把「落在哪个页面 / localStorage 有哪些键 / idToken 长度」弹出来。 */
+    private void toastDiag() {
+        try {
+            web.evaluateJavascript(DIAG_JS, v -> {
+                try {
+                    android.widget.Toast.makeText(this, "诊断 " + clean(v), android.widget.Toast.LENGTH_LONG).show();
+                } catch (Throwable ignored) {
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static final String DIAG_JS =
+            "(function(){var k=Object.keys(localStorage);"
+                    + "return JSON.stringify({u:location.pathname.slice(0,28),n:k.length,"
+                    + "i:(localStorage.getItem(\"idToken\")||\"\").length,"
+                    + "x:(localStorage.getItem(\"X-Id-Token\")||\"\").length,"
+                    + "k:k.slice(0,5).join(\",\")});})()";
+
     private void finishWithPayload(String payload) {
+        toastDiag();
         try { android.widget.Toast.makeText(this, "登录态剩余 " + Math.round(leftHours(payload)) + " 小时", android.widget.Toast.LENGTH_LONG).show(); } catch (Throwable ignored) { }
         if (done) {
             return;
