@@ -367,7 +367,7 @@ public class LoginActivity extends Activity {
 
     private static final String DIAG_JS =
             "(function(){var k=Object.keys(localStorage);"
-                    + "return JSON.stringify({u:location.pathname.slice(0,28),n:k.length,"
+                    + "return JSON.stringify({u:location.href.slice(0,88),n:k.length,"
                     + "i:(localStorage.getItem(\"idToken\")||\"\").length,"
                     + "x:(localStorage.getItem(\"X-Id-Token\")||\"\").length,"
                     + "k:k.slice(0,5).join(\",\")});})()";
