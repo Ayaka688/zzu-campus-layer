@@ -29,10 +29,12 @@ final class AppBind {
     private static final int TIMEOUT_MS = 15_000;
     private static final int VALID = 2;
 
-    /** start 之后记住这三样，submit 时要用（一次只绑一台设备，静态够了）。 */
+    /** start 之后记住这几样，submit 时要用（一次只绑一台设备，静态够了）。 */
     private static volatile String pendingGid = "";
     private static volatile String pendingAttest = DEFAULT_ATTEST;
     private static volatile String pendingCreds = "";
+    /** detect 那次给的 MFA state：verify 通过后要用**同一个** state 登录，不能重新 detect。 */
+    private static volatile String pendingState = "";
 
     private AppBind() {
     }
@@ -70,10 +72,10 @@ final class AppBind {
                 // 这台设备已经登记过了：不用验，直接换票。
                 // 另一种可能是密码不对——学校的 detect 对错密码也回 need:false（很阴），
                 // 所以这里换票失败时要把两种可能是都摆出来。
-                String token = AppMint.mint(credsJson);
-                return token != null && !token.isEmpty()
-                        ? done(token)
-                        : error("学校说这台设备已登记，但换票没成——多半是密码不对，也可能是网络");
+                AppMint.MintOut out = AppMint.mintDetailed(credsJson);
+                return out.token.isEmpty()
+                        ? error("学校说这台设备已登记，但换票没成：" + out.error + "（密码不对也会这样）")
+                        : done(out.token);
             }
 
             String state = ddata.optString("state", "");
@@ -105,6 +107,7 @@ final class AppBind {
             pendingGid = gid;
             pendingAttest = attest;
             pendingCreds = credsJson;
+            pendingState = state;
             JSONObject out = new JSONObject();
             out.put("step", "code");
             out.put("phone", phone);
@@ -138,12 +141,13 @@ final class AppBind {
                 return error(msg.isEmpty() ? "验证码不对或已过期" : msg);
             }
 
-            String token = AppMint.mint(pendingCreds);
+            AppMint.MintOut out = AppMint.loginWithState(pendingCreds, pendingState);
             pendingGid = "";
-            if (token == null || token.isEmpty()) {
-                return error("设备登记成功，但换票没成（网络？）");
+            if (out.token.isEmpty()) {
+                // 短信过了但登录没成：把服务端原话带出去，别再让用户看见「网络？」这种瞎猜
+                return error("设备登记成功，但换票没成：" + out.error);
             }
-            return done(token);
+            return done(out.token);
         } catch (Throwable e) {
             return error(e.getClass().getSimpleName() + (e.getMessage() == null ? "" : "：" + e.getMessage()));
         }

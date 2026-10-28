@@ -256,13 +256,31 @@ export async function appDetect(
 
 /** 真正换票。`need:false`（可信设备）时一条请求就够。 */
 export async function mintViaApp(creds: AppCreds, timeoutMs = 12_000): Promise<AppMintOutcome> {
-  let key: RsaPublicKey;
-  let state: string;
   try {
     const detect = await appDetect(creds, timeoutMs);
-    key = detect.key;
-    state = detect.state;
     if (detect.need) return { ok: false, reason: 'mfa' };
+    return await mintViaAppState(creds, detect.state, timeoutMs, detect.key);
+  } catch (err) {
+    return { ok: false, reason: 'network', detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * 只做「登录那一半」，用调用方给的 `mfaState`（`key` 可顺手传进来，省一次公钥请求）。
+ *
+ * <p>绑定流程必须用它：短信校验（status 2）之后**不能重新 detect**——实测学校这时仍回
+ * `need:true`（可信设备是在这次 passwordLogin 成功时才登记的），`mintViaApp()` 会误判成
+ * 「还要验证」。这也正是 0.2.74 真机上报「设备登记成功，但换票没成」的原因。
+ */
+export async function mintViaAppState(
+  creds: AppCreds,
+  state: string,
+  timeoutMs = 12_000,
+  knownKey?: RsaPublicKey,
+): Promise<AppMintOutcome> {
+  let key: RsaPublicKey;
+  try {
+    key = knownKey ?? (await loadKey(timeoutMs));
   } catch (err) {
     return { ok: false, reason: 'network', detail: err instanceof Error ? err.message : String(err) };
   }

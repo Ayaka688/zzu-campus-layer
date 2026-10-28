@@ -487,6 +487,42 @@ HTTP 500 {"timestamp":"…","status":500,"error":"Internal Server Error",
 - 「可信设备」只保证**短期内**再换票不用再验，不能当成永久免验；
 - 30 天票到期时，还是要再走一次短信（或者靠 §2–§9 的 TGC 兜底，如果它还在有效期内）。
 
+#### 10.5.4 踩过的坑：短信到了、码也对了，但「换票没成」（0.2.74 → 0.2.75）
+
+第三轮真机反馈：验证码框终于出现了，短信也收到了，码填进去点「提交验证码」，
+提示变成「设备登记成功，但换票没成（网络？）」。桌面复验这一步：
+
+```bash
+ZZU_DEVICE_ID=zzu-layer-45f757543d42003f node scripts/app-ticket.mjs --json
+# → FAILED: 这台设备（zzu-layer-45f757543d42003f）还没过 MFA
+```
+
+也就是说：**短信明明校验通过了（`status 2`），学校那一刻仍然说这台设备 `need:true`。**
+
+真因不在学校，在我们的顺序。`AppBind.submit()` 在校验通过后调 `AppMint.mint()`，
+而 `mint()` 会**重新走一遍 `mfa/detect`**；此时可信设备还没登记（它是这次
+`passwordLogin` 成功后才登记的），于是 detect 回 `need:true` → `mint()` 直接返回 null
+→ 界面只能说「换票没成」。
+
+而 CLI 当初走通的顺序是：
+
+```
+detect（拿 state） → 短信 send/valid（status 2） → 用**那次 state** 直接 passwordLogin
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 这一步同时把 deviceId 登记成可信设备
+```
+
+修法（0.2.75）：
+
+1. `AppBind` 记住 `pendingState`，`submit()` 改调新的 `AppMint.loginWithState(creds, state)`
+   ——只发 `passwordLogin`，**不再 detect**；
+2. `AppMint` 拆出 `mintDetailed()`（返回 `MintOut{token,error}`）与 `loginWithState()`，
+   失败把 `HTTP <status>：<服务端 message>` 原样带出去（不再出现「网络？」这种瞎猜）；
+3. TS 侧对称：`mintViaAppState(creds, state, timeoutMs, knownKey?)`，绑定向导的
+   `doVerify()` 用它（拿 `phase.ctx.state`），`mintViaApp()` 则改为「detect → 调 `mintViaAppState`」。
+
+教训：**MFA 的 `state` 是一次性的、也是唯一有效的凭据**——过了短信就要立刻用它换票，
+中间插一次 detect 会把「刚登记好」的状态读成「还没登记」。
+
 ### 10.6 与旧方案的关系
 
 | | §2–§9（`/cas/` + TGC） | §10（`/token/` + 账密） |

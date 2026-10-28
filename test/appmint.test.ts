@@ -13,6 +13,7 @@ import {
   base64Decode,
   base64Encode,
   mintViaApp,
+  mintViaAppState,
   parsePublicKey,
   rsaEncrypt,
   type AppCreds,
@@ -208,6 +209,55 @@ describe('mintViaApp', () => {
     if (out.ok) return;
     expect(out.reason).toBe('network');
     expect(out.detail).toContain('Failed to fetch');
+  });
+});
+
+describe('mintViaAppState（绑定流程用的那半条路）', () => {
+  beforeEach(() => {
+    calls = [];
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it('短信刚过、detect 仍说 need=true 也没关系：只拿公钥 + 登录，用给定的 state', async () => {
+    const exp = Math.floor(Date.now() / 1000) + 720 * 3600;
+    stubFetch((url) => {
+      if (url.startsWith(APP_KEY_URL)) return new Response(keyPair.publicKey, { status: 200 });
+      if (url.startsWith(APP_LOGIN_URL)) return json({ code: 0, data: { idToken: fakeIdToken(exp) } });
+      throw new Error(`不该请求 ${url}`);
+    });
+
+    const out = await mintViaAppState(creds, 'mfa-state-9');
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.expMs).toBe(exp * 1000);
+    // 只发两条：公钥 + 登录（不 detect）
+    expect(calls.map((c) => c.method)).toEqual(['GET', 'POST']);
+    expect(calls.some((c) => c.url.startsWith(APP_DETECT_URL))).toBe(false);
+    expect(calls[1]?.url ?? '').toContain('mfaState=mfa-state-9');
+  });
+
+  it('登录被拒 → rejected 并带服务端 message（好让界面显示原因）', async () => {
+    stubFetch((url) => {
+      if (url.startsWith(APP_KEY_URL)) return new Response(keyPair.publicKey, { status: 200 });
+      return json({ code: 400, message: 'exception.mfa.verify.error' });
+    });
+    const out = await mintViaAppState(creds, 's');
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toBe('rejected');
+    expect(out.detail).toContain('mfa.verify.error');
+  });
+
+  it('公钥取不到 → network，不把异常抛给调用方', async () => {
+    stubFetch(() => {
+      throw new TypeError('Failed to fetch');
+    });
+    const out = await mintViaAppState(creds, 's');
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toBe('network');
   });
 });
 

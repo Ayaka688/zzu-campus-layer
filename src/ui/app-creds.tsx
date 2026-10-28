@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from 'preact/hooks';
 import { canMintInBrowser } from '../core/casMint';
-import { mintViaApp } from '../core/appMint';
+import { mintViaApp, mintViaAppState } from '../core/appMint';
 import {
   canBindInShell,
   clearShellCrash,
@@ -131,15 +131,17 @@ export function AppCreds({ browserOnly = false }: Props) {
 
   async function doVerify() {
     if (phase.kind !== 'code') return;
+    const ctx = phase.ctx;
     setPhase({ kind: 'busy', what: '校验中…' });
-    const out = mode === 'shell' ? await submitCodeInShell(code) : await submitCode(phase.ctx, code);
+    const out = mode === 'shell' ? await submitCodeInShell(code) : await submitCode(ctx, code);
     if (!out.ok) {
-      setPhase({ kind: 'code', ctx: phase.ctx, phone: phase.phone });
+      setPhase({ kind: 'code', ctx, phone: phase.phone });
       setNote(out.detail ?? '验证码不对');
       return;
     }
     await markCredsTrusted();
-    setSaved(await getAppCreds());
+    const fresh = await getAppCreds();
+    setSaved(fresh);
     setCode('');
 
     if (out.idToken) {
@@ -149,7 +151,9 @@ export function AppCreds({ browserOnly = false }: Props) {
       setNote('绑定完成，已换到一张 30 天的票');
       return;
     }
-    const minted = await mintViaApp((await getAppCreds())!);
+    // 扩展这条路：短信刚过时学校仍说「设备不可信」（可信是在这次 passwordLogin 才登记的），
+    // 所以必须拿刚才那次 detect 的 state 直接登录，不能重新 detect。
+    const minted = fresh ? await mintViaAppState(fresh, ctx.state) : { ok: false as const, reason: 'network' as const };
     if (minted.ok) {
       await storeToken(minted.idToken);
       setPhase({ kind: 'done' });

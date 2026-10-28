@@ -39,13 +39,37 @@ final class AppMint {
     private AppMint() {
     }
 
+    /** 换票结果：要么拿到票，要么带一句能看懂的失败原因（别再用 null 让上层瞎猜）。 */
+    static final class MintOut {
+        final String token;
+        final String error;
+
+        MintOut(String token, String error) {
+            this.token = token;
+            this.error = error;
+        }
+
+        static MintOut ok(String token) {
+            return new MintOut(token, "");
+        }
+
+        static MintOut bad(String error) {
+            return new MintOut("", error);
+        }
+    }
+
     /**
      * @param credsJson 形如 {@code {"account":"...","password":"...","deviceId":"..."}}（来自 PWA 的 localStorage）
      * @return 30 天的 idToken；拿不到（设备不可信 / 网络错 / 账号密码不对）返回 null
      */
     static String mint(String credsJson) {
+        return mintDetailed(credsJson).token;
+    }
+
+    /** detect → 设备已可信就直接登录；要验证就如实回报（交给上层走短信）。 */
+    static MintOut mintDetailed(String credsJson) {
         if (credsJson == null || credsJson.isEmpty()) {
-            return null;
+            return MintOut.bad("没有学号密码");
         }
         try {
             JSONObject o = new JSONObject(credsJson);
@@ -53,46 +77,105 @@ final class AppMint {
             String password = opt(o, "password");
             String deviceId = opt(o, "deviceId");
             if (account.isEmpty() || password.isEmpty() || deviceId.isEmpty()) {
-                return null;
+                return MintOut.bad("学号/密码/设备号不全");
             }
-            String pem = get(BASE + "/token/jwt/publicKey", "okhttp/3.12.1");
-            RsaPublicKey key = parseKey(pem);
+            RsaPublicKey key = key();
             if (key == null) {
-                return null;
+                return MintOut.bad("拿不到公钥");
             }
 
             String detectUrl = BASE + "/token/mfa/detect?username=" + enc(rsaEncrypt(key, account))
                     + "&password=" + enc(rsaEncrypt(key, password))
                     + "&deviceId=" + enc(deviceId);
-            JSONObject detect = new JSONObject(post(detectUrl));
+            Resp dr = postResp(detectUrl);
+            JSONObject detect = new JSONObject(dr.body);
             if (detect.optInt("code", -1) != 0) {
-                return null;
+                return MintOut.bad("detect HTTP " + dr.status + "：" + svcMessage(detect));
             }
             JSONObject ddata = detect.optJSONObject("data");
-            if (ddata == null || ddata.optBoolean("need", true)) {
-                // 这台设备还没登记成可信设备：得先人工过一遍 MFA，别在这儿卡住用户。
-                return null;
+            if (ddata == null) {
+                return MintOut.bad("detect 没有 data");
             }
-            String state = ddata.optString("state", "");
+            if (ddata.optBoolean("need", true)) {
+                // 这台设备还没登记成可信设备：得先人工过一遍 MFA，别在这儿卡住用户。
+                return MintOut.bad("这台设备还要过一次短信验证");
+            }
+            return loginWithState(credsJson, ddata.optString("state", ""));
+        } catch (Throwable e) {
+            // Throwable：不让任何解析/网络错误把进程带走
+            return MintOut.bad(e.getClass().getSimpleName() + "：" + (e.getMessage() == null ? "" : e.getMessage()));
+        }
+    }
 
+    /**
+     * MFA 刚过，直接用那一次的 {@code state} 登录——**不要重新 detect**。
+     *
+     * <p>踩过的坑：短信 {@code valid} 返回 status 2 之后立刻再 detect，学校仍然回 {@code need:true}
+     * （「可信设备」是在这次 passwordLogin 成功时才登记的，也可能有缓存延迟）。
+     * 所以绑定流程必须拿原来的 state 直接登录；这一步同时也把 deviceId 登记成可信设备。
+     */
+    static MintOut loginWithState(String credsJson, String state) {
+        if (credsJson == null || credsJson.isEmpty()) {
+            return MintOut.bad("没有学号密码");
+        }
+        try {
+            JSONObject o = new JSONObject(credsJson);
+            String account = opt(o, "account");
+            String password = opt(o, "password");
+            String deviceId = opt(o, "deviceId");
+            if (account.isEmpty() || password.isEmpty() || deviceId.isEmpty()) {
+                return MintOut.bad("学号/密码/设备号不全");
+            }
+            RsaPublicKey key = key();
+            if (key == null) {
+                return MintOut.bad("拿不到公钥");
+            }
             String loginUrl = BASE + "/token/password/passwordLogin?username=" + enc(rsaEncrypt(key, account))
                     + "&password=" + enc(rsaEncrypt(key, password))
                     + "&appId=" + enc(APP_ID)
                     + "&osType=android&geo="
                     + "&deviceId=" + enc(deviceId)
                     + "&clientId="
-                    + "&mfaState=" + enc(state);
-            JSONObject login = new JSONObject(post(loginUrl));
+                    + "&mfaState=" + enc(state == null ? "" : state);
+            Resp lr = postResp(loginUrl);
+            JSONObject login;
+            try {
+                login = new JSONObject(lr.body);
+            } catch (Exception e) {
+                return MintOut.bad("login HTTP " + lr.status + "：" + shorten(lr.body, 100));
+            }
             if (login.optInt("code", -1) != 0) {
-                return null;
+                return MintOut.bad("login HTTP " + lr.status + "：" + svcMessage(login));
             }
             JSONObject ldata = login.optJSONObject("data");
             String idToken = ldata == null ? "" : ldata.optString("idToken", "");
-            return idToken.isEmpty() ? null : idToken;
+            return idToken.isEmpty() ? MintOut.bad("login 没给 idToken") : MintOut.ok(idToken);
         } catch (Throwable e) {
-            // Throwable：不让任何解析/网络错误把进程带走
+            return MintOut.bad(e.getClass().getSimpleName() + "：" + (e.getMessage() == null ? "" : e.getMessage()));
+        }
+    }
+
+    /** 取公钥并解析（每次都取：只有 444 B，不缓存反而省心）。 */
+    static RsaPublicKey key() {
+        try {
+            return parseKey(get(BASE + "/token/jwt/publicKey", "okhttp/3.12.1"));
+        } catch (Throwable e) {
             return null;
         }
+    }
+
+    /** 服务端错误里最值得看的那句话（Spring 的 message/error，或本工程的 message）。 */
+    static String svcMessage(JSONObject body) {
+        String m = body.optString("message", "");
+        if (m.isEmpty()) {
+            m = body.optString("error", "");
+        }
+        return m.isEmpty() ? body.toString() : m;
+    }
+
+    static String shorten(String s, int max) {
+        String t = s == null ? "" : s.replaceAll("\\s+", " ").trim();
+        return t.length() > max ? t.substring(0, max) + "…" : t;
     }
 
     // ---- HTTP ----
