@@ -276,11 +276,15 @@ TGC 剩余 335.7h（2026-11-11T04:48:15.000Z）
 | `src/core/casMint.ts` | 浏览器内的**一条 fetch 换票**（`mintViaFetch()`）：靠扩展的 `host_permissions` 带 Cookie 访问 CAS，读到 302 后的 `response.url` 就能抠出 ticket |
 | `src/core/renew.ts` | 续票入口：`needsRefresh()`（剩 <2 h 就该换）、`ensureFresh()`（按需）、`mintIntoSession()`（账密 30 天 → CAS fetch 8h → 落库）、`renewFromCas()`（标签页慢路，PWA 用） |
 | `src/core/appMint.ts` | 浏览器内**账密直换 30 天票**（`mintViaApp()`）：手写 RSA PKCS#1 v1.5 + `fetch`，不需要 cookie、不需要浏览器 |
-| `src/core/creds.ts` | 学号/密码/deviceId 的本机存储（KV key `appCreds`），`newDeviceId()` 生成 `zzu-layer-<16 hex>` |
-| `src/ui/app-creds.tsx` | 侧边栏与 PWA 设置里的「学号密码」表单（`<AppCreds />`） |
-| `scripts/app-login.mjs` | 一次性绑定（§10.3）：短信验证一次 → 登记可信设备 → 立刻换一张 30 天票 |
+| `src/core/appBind.ts` | **绑定向导**（§10.3）：`startBind()`（detect → init → 发短信）、`submitCode()`（校验）、`canBindInShell()` / `startBindInShell()` / `submitCodeInShell()`（安卓壳那条桥） |
+| `src/core/creds.ts` | 学号/密码/deviceId 的本机存储（KV key `appCreds`，含 `trustedAt`），`newDeviceId()` 生成 `zzu-layer-<16 hex>` |
+| `src/ui/app-creds.tsx` | 侧边栏与 PWA 设置里的「学号密码 + 绑定向导」（`<AppCreds />`）：填密码 → 点绑定 → 填短信码 → 完成 |
+| `scripts/app-login.mjs` | 一次性绑定（§10.3 的命令行做法）：短信验证一次 → 登记可信设备 → 立刻换一张 30 天票 |
 | `scripts/app-ticket.mjs` | 账密换 30 天票：`ensureAppToken()` / `mintAppToken()` / `verifyToken()` / `deviceStatus()`；`--if-stale=24` / `--force` / `--verify` / `--json` |
 | `mobile/.../AppMint.java` | 安卓壳里的同一套协议（纯 `HttpURLConnection` + 手写 RSA），续票第一级台阶 |
+| `mobile/.../AppBind.java` | 安卓壳里的绑定向导（发短信 / 校码 / 顺手换票），经 `CampusNotify.appBindStart/appBindSubmit` 暴露给页面 |
+| `test/appmint.test.ts` | 19 例：base64 往返、DER 剥 n/e、`__RSA__` 密文用 Node `privateDecrypt` 解回原文、`mintViaApp` 四条分支、creds 存取 |
+| `test/appbind.test.ts` | 16 例：init/send/valid 的顺序与参数、status 2/3 的翻译、限流与网络错、壳桥的 code/done/error/超时 |
 
 ### 9.1 浏览器里怎么用（扩展 = 快路；PWA/App = 慢路）
 
@@ -347,12 +351,25 @@ POST https://cas.s.zzu.edu.cn/token/password/passwordLogin?username=<__RSA__…>
 
 ### 10.3 第一次怎么绑定（一次短信）
 
+三种做法，选一个：
+
+1. **App 内绑定向导（推荐，手机上就能做）**：设置里填学号密码 → 点「绑定（换 30 天票）」→
+   App 自己发短信（原生 `AppBind.java`）→ 填收到的 4~6 位码 → 这台手机的 `deviceId` 登记为可信设备，
+   顺手换一张 30 天票。页面与原生之间的协议：
+   `CampusNotify.appBindStart(credsJson)` / `appBindSubmit(code)` → 回调 `window.__campusBind(json)`，
+   `step` 取 `code|done|error`（`src/core/appBind.ts` ↔ `AppBind.java`）。
+2. **扩展侧边栏**：同一个设置块，浏览器里由 `src/core/appBind.ts` 直接 `fetch`（host_permissions 豁免 CORS）。
+3. **命令行**（电脑上，无 UI 时用）：
+
 ```powershell
 $env:ZZU_USER='2026150xxxxx'; $env:ZZU_PASS='…'
 npm run app:login
 #   打印「短信已发到 195****7500」，把收到的 4~6 位码写进 .cas-state/sms-code.txt
 #   成功后 .cas-state/app.json 里记下 account / password / deviceId / trustedAt
 ```
+
+> 为什么向导要放在壳里：`cas.s.zzu.edu.cn` 不给我们 `Access-Control-Allow-Origin`，预检还回 403，
+> 所以网页里连一个 POST 都发不出去。扩展和安卓壳各有各的豁免，浏览器页面没有。
 
 之后（不需要任何人工、不需要浏览器）：
 
@@ -366,11 +383,12 @@ npm run app:ticket -- --json       # {"idToken": "…", "leftH": 719.9, …}
 
 | 宿主 | 能不能直接调 `/token/` | 做法 |
 | --- | --- | --- |
-| 浏览器扩展 | **能**（`host_permissions` 含 `cas.s.zzu.edu.cn`，不受 CORS 限制） | `src/core/renew.ts` 的 `mintIntoSession()` 先试 `mintViaApp()`（`src/core/appMint.ts`：手写 RSA PKCS#1 v1.5 + 原生 `fetch`），失败再落 `/cas/` fetch 快路 |
-| PWA（网页） | **不能**：`cas.s.zzu.edu.cn/token/*` 没有任何 `Access-Control-Allow-Origin`，预检 403 | 设置里填学号密码（存 `localStorage` 的 `campus-layer:appCreds`），交给壳去做 |
-| 安卓壳 | **能**（原生） | `AppMint.java`：读 PWA 的 `localStorage` 凭据 → 纯 `HttpURLConnection` 换票 → 交给页面 `__campusImport`；失败才退 `CasMint`，再失败才开登录页 |
+| 浏览器扩展 | **能**（`host_permissions` 含 `cas.s.zzu.edu.cn`，不受 CORS 限制） | `src/core/renew.ts` 的 `mintIntoSession()` 先试 `mintViaApp()`（`src/core/appMint.ts`：手写 RSA PKCS#1 v1.5 + 原生 `fetch`），失败再落 `/cas/` fetch 快路；绑定跑 `src/core/appBind.ts` |
+| PWA（网页） | **不能**：`cas.s.zzu.edu.cn/token/*` 没有任何 `Access-Control-Allow-Origin`，预检 403 | 设置里填学号密码（存 `localStorage` 的 `campus-layer:appCreds`），绑定与换票都交给壳；页面上是同一个 `<AppCreds />`，只是走了 `CampusNotify.appBindStart/appBindSubmit` 这条桥 |
+| 安卓壳 | **能**（原生） | `AppMint.java` 换票、`AppBind.java` 发/校短信；读 PWA 的 `localStorage` 凭据 → 交给页面 `__campusImport`；失败才退 `CasMint`，再失败才开登录页 |
 
-于是安卓端的续票顺序是 **AppMint（30 天，静默）→ CasMint（8 小时，靠 TGC）→ 登录页（要人工 MFA）**。
+于是安卓端的续票顺序是 **AppMint（30 天，静默）→ CasMint（8 小时，靠 TGC）→ 登录页（要人工 MFA）**；
+第一次绑定在 App 里就能做完（设置 → 绑定 → 填一次短信码），不必再开电脑。
 
 ### 10.5 两个诚实的限制
 
@@ -380,15 +398,15 @@ npm run app:ticket -- --json       # {"idToken": "…", "leftH": 719.9, …}
 - **实测范围**：eams-door（`X-Id-Token` 与 `Authorization` 都 200）与新门户 `info.s.zzu.edu.cn/portal-api`
   都认这张票；新教务 `/student` 页面本体仍然只认它自己的 cookie 会话（§1.1），跟 CAS 票一样不吃。
 - **验证程度**：协议本身在 Node 里实测透了（CLI 出票 150 ms、`--verify` eams-door 200、reuse 分支剩 720 h），
-  安卓壳的 Java 版也编进了 0.2.71 的 APK（`classes2.dex` 里能查到 `AppMint` / `SWSuperApp` /
-  `passwordLogin` / `mfa/detect`），但**扩展里 `mintViaApp()` 的快路没在真浏览器跑过**
-  （本机没有 Chrome，Edge 起不来）；它与 CLI 是同一套协议、同样的 `fetch`，差别只在于扩展不受 CORS 限制。
-  真跑出问题时，`mintIntoSession()` 会自动落到 CAS 那条路上，不会卡死。
+  安卓壳的 Java 版（`AppMint` / `AppBind`）编进了 0.2.72 的 APK（`classes2.dex` 里能查到类名与方法名，
+  CI 里 `gradle assembleDebug` 通过），但**没在真机上点过一遍**——本机没有 JDK / Android SDK / 手机，
+  只有 CI 的编译结果；扩展里的 `mintViaApp()` 与绑定向导同样**没在真浏览器跑过**（本机没有 Chrome，
+  Edge 起不来）。它们与 CLI 是同一套协议、同样的请求形状，差别只在谁发请求。
+  真出问题时：换票会落 CAS 那条路，绑定只影响「要不要填一次码」，不会把已经能用的票弄坏。
 - **可信设备的有效期未知**：只知道登记后立刻 `need=false`，不知道多久失效、也不知道吊销后表现如何。
-  真失效的表现是 `need` 变回 true → 上层退 CAS 慢路 → 提示重登。
-- **首次登记目前只能从电脑上做**：手机上填了账密也只是把凭据存到 `localStorage`，第一次的短信验证
-  还得在电脑跑 `npm run app:login`（或者等你手动抓一次真机的 deviceId）。壳里的「绑定向导」
-  （App 内发短信 + 输入 6 位码）是下一步要补的东西；在那之前，安卓端第一次仍会退到登录页。
+  真失效的表现是 `need` 变回 true → 上层退 CAS 慢路 → 设置页重新点一次「绑定」。
+- **短信有频率限制**：一分钟内连点会回「验证码发送过于频繁，请稍后再试」，界面上会原样显示这句。
+  校验失败不消耗设备登记（可以重发、重填）；校验成功才登记，登记后这条 `gid` 就作废了。
 
 ### 10.6 与旧方案的关系
 

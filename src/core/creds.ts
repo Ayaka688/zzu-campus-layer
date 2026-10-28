@@ -14,6 +14,8 @@ const KEY = 'appCreds';
 
 export interface StoredAppCreds extends AppCreds {
   savedAt: number;
+  /** 这台设备过完短信验证的时间（有了它理论上就不用再验；学校那边多久放宽未知） */
+  trustedAt?: number;
 }
 
 export function newDeviceId(): string {
@@ -34,17 +36,34 @@ export async function getAppCreds(): Promise<StoredAppCreds | null> {
     password: got.password,
     deviceId: typeof got.deviceId === 'string' && got.deviceId ? got.deviceId : newDeviceId(),
     savedAt: typeof got.savedAt === 'number' ? got.savedAt : Date.now(),
+    ...(typeof got.trustedAt === 'number' && got.trustedAt > 0 ? { trustedAt: got.trustedAt } : {}),
   };
 }
 
-/** 保存（deviceId 留空则沿用旧的，没有就新生成）。 */
+/** 保存（deviceId 留空则沿用旧的，没有就新生成）。换设备时「已验证」标记作废。 */
 export async function saveAppCreds(input: Partial<AppCreds>): Promise<StoredAppCreds> {
   const prev = await getAppCreds();
   const account = (input.account ?? prev?.account ?? '').trim();
   const password = input.password ?? prev?.password ?? '';
   const deviceId = (input.deviceId ?? prev?.deviceId ?? '').trim() || newDeviceId();
   if (!account || !password) throw new Error('学号和密码都要填');
-  const next: StoredAppCreds = { account, password, deviceId, savedAt: Date.now() };
+  const trustedAt = deviceId === prev?.deviceId ? prev?.trustedAt : undefined;
+  const next: StoredAppCreds = {
+    account,
+    password,
+    deviceId,
+    savedAt: Date.now(),
+    ...(trustedAt ? { trustedAt } : {}),
+  };
+  await getKV().set(KEY, next);
+  return next;
+}
+
+/** 短信验证过了：给这台设备记一笔，界面就能显示「已登记」。 */
+export async function markCredsTrusted(at = Date.now()): Promise<StoredAppCreds | null> {
+  const prev = await getAppCreds();
+  if (!prev) return null;
+  const next: StoredAppCreds = { ...prev, trustedAt: at };
   await getKV().set(KEY, next);
   return next;
 }
@@ -56,5 +75,6 @@ export async function clearAppCreds(): Promise<void> {
 /** 只给界面看的脱敏描述。 */
 export function describeCreds(creds: StoredAppCreds | null): string {
   if (!creds) return '未绑定';
-  return `${creds.account} · 设备 ${creds.deviceId}`;
+  const device = `设备 ${creds.deviceId}`;
+  return `${creds.account} · ${device}${creds.trustedAt ? ' · 已过短信验证' : ' · 待短信验证'}`;
 }

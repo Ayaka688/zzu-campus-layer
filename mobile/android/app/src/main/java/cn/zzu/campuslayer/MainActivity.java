@@ -198,6 +198,41 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        /**
+         * 绑定向导第一步：页面把学号密码丢过来，原生去问学校「这台设备要不要验证」，
+         * 要就顺手把短信发出去。结果经 {@code window.__campusBind(json)} 回给页面。
+         *
+         * <p>为什么不让页面自己发：{@code cas.s.zzu.edu.cn} 不给我们 ACAO，浏览器里
+         * 一个 POST 都发不出去（预检直接 403）。
+         */
+        @JavascriptInterface
+        public void appBindStart(String credsJson) {
+            final String json = credsJson == null ? "" : credsJson;
+            new Thread(() -> {
+                final String result = AppBind.start(json);
+                runOnUiThread(() -> pushBind(result));
+            }, "bind-start").start();
+        }
+
+        /** 绑定向导第二步：校验短信码。过了原生顺手换一张 30 天票，idToken 一起回给页面。 */
+        @JavascriptInterface
+        public void appBindSubmit(String code) {
+            final String digits = code == null ? "" : code;
+            new Thread(() -> {
+                final String result = AppBind.submit(digits);
+                runOnUiThread(() -> pushBind(result));
+            }, "bind-submit").start();
+        }
+    }
+
+    /** 把绑定向导的一步结果交回页面。 */
+    private void pushBind(String json) {
+        if (web == null) {
+            return;
+        }
+        web.evaluateJavascript(
+                "window.__campusBind&&window.__campusBind(" + org.json.JSONObject.quote(json) + ")", null);
     }
 
     /**

@@ -96,7 +96,7 @@ final class AppMint {
 
     // ---- HTTP ----
 
-    private static String get(String url, String ua) throws Exception {
+    static String get(String url, String ua) throws Exception {
         HttpURLConnection c = open(url, ua);
         try {
             int code = c.getResponseCode();
@@ -107,7 +107,7 @@ final class AppMint {
         }
     }
 
-    private static String post(String url) throws Exception {
+    static String post(String url) throws Exception {
         HttpURLConnection c = open(url, UA);
         c.setRequestMethod("POST");
         c.setDoOutput(false);
@@ -129,7 +129,7 @@ final class AppMint {
         return c;
     }
 
-    private static String read(HttpURLConnection c, int code) throws Exception {
+    static String read(HttpURLConnection c, int code) throws Exception {
         InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
         if (in == null) {
             return "";
@@ -147,11 +147,11 @@ final class AppMint {
         }
     }
 
-    private static String enc(String s) throws Exception {
+    static String enc(String s) throws Exception {
         return URLEncoder.encode(s, "UTF-8");
     }
 
-    private static String opt(JSONObject o, String k) {
+    static String opt(JSONObject o, String k) {
         String v = o.optString(k, "");
         return v == null ? "" : v.trim();
     }
@@ -160,7 +160,7 @@ final class AppMint {
     // 不用 Cipher：Android 上 "RSA/ECB/PKCS1Padding" 各版本行为不一，而这里只需要
     // 「填充 + 一次模幂」，手写反而稳（和扩展里的 src/core/appMint.ts 是同一套算法）。
 
-    private static final class RsaPublicKey {
+    static final class RsaPublicKey {
         final BigInteger n;
         final BigInteger e;
         final int size;
@@ -172,7 +172,7 @@ final class AppMint {
         }
     }
 
-    private static RsaPublicKey parseKey(String body) {
+    static RsaPublicKey parseKey(String body) {
         if (body == null || body.isEmpty()) {
             return null;
         }
@@ -221,7 +221,7 @@ final class AppMint {
         return out;
     }
 
-    private static String rsaEncrypt(RsaPublicKey key, String plain) {
+    static String rsaEncrypt(RsaPublicKey key, String plain) {
         byte[] msg = plain.getBytes(StandardCharsets.UTF_8);
         int k = key.size;
         if (msg.length > k - 11) {
