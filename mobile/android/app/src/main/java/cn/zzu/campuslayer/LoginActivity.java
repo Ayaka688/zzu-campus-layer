@@ -27,6 +27,11 @@ public class LoginActivity extends Activity {
 
     /** 静默续期的硬上限：CAS 若弹了登录表单（TGT 过期），再等也不会自己好。 */
     private static final long SILENT_DEADLINE_MS = 12_000;
+    /** 门户首页：只有它会把 81.8 小时那张 idToken 写进 localStorage。 */
+    private static final String PORTAL_HOME = "https://uniapp.s.zzu.edu.cn/pages/tab/index/index";
+    /** CAS 回跳 URL 上的票（通常 8 小时），先存着，最后和 localStorage 的票比长短。 */
+    private String urlTicket = "";
+    private boolean wentPortal = false;
     private Runnable silentDeadline;
 
     private WebView web;
@@ -87,6 +92,7 @@ public class LoginActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (harvestUrl(url)) {
+                    startPoll();
                     return;
                 }
                 // 先看 localStorage 里有没有「更长的票」：门户/教务自己种的 idToken 可能是 30 天，
@@ -132,10 +138,17 @@ public class LoginActivity extends Activity {
                     String raw = clean(value);
                     String[] parts = raw.isEmpty() ? new String[0] : raw.split("\n");
                     String local = parts.length > 1 && isJwt(parts[1]) ? parts[1] : "";
-                    String fromUrl = parts.length > 0 ? ticketPayload(parts[0]) : "";
+                    String fromUrl = !urlTicket.isEmpty() ? ticketPayload(urlTicket)
+                            : (parts.length > 0 ? ticketPayload(parts[0]) : "");
                     String best = pickLonger(local, fromUrl);
                     if (best != null) {
                         finishWithPayload(best);
+                    } else if (!urlTicket.isEmpty()) {
+                        // 门户首页迟迟不写 localStorage：退回 URL 上那张短票，别让用户干等
+                        pollCount++;
+                        if (pollCount >= 6) {
+                            finishWithPayload(urlTicket);
+                        }
                     }
                 });
                 if (silent) {
@@ -217,6 +230,15 @@ public class LoginActivity extends Activity {
         return l >= u ? local : fromUrl;
     }
 
+    /** 拿到票之后再去一趟门户首页：只有门户应用会把长票写进 localStorage。 */
+    private void goPortal() {
+        if (wentPortal || done) {
+            return;
+        }
+        wentPortal = true;
+        web.post(() -> web.loadUrl(PORTAL_HOME));
+    }
+
     /** 地址里带 ticket / idToken 就当场收工。返回 true 表示已处理。 */
     private boolean harvestUrl(String url) {
         if (url == null || done) {
@@ -233,7 +255,8 @@ public class LoginActivity extends Activity {
                 tk = tk.substring(0, amp);
             }
             if (tk.indexOf('.') > 0) {
-                finishWithPayload(url);
+                urlTicket = url;
+                goPortal();
                 return true;
             }
             return false;
