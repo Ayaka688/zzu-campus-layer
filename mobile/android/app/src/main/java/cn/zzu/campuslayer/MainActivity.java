@@ -202,7 +202,7 @@ public class MainActivity extends Activity {
 
     /**
      * 登录态快到期（<2 小时）时，在后台静默续一次：
-     * CAS 的 TGT cookie 还在的话，登录页会直接 302 带 ticket 回来，不用你重登。
+     * CAS 的 TGT cookie 还在的话，一条请求就能换新票，不用你重登、也不闪页面。
      */
     private void maybeSilentRenew() {
         if (renewAsked || web == null) {
@@ -212,9 +212,31 @@ public class MainActivity extends Activity {
         web.evaluateJavascript("(function(){try{var raw=localStorage.getItem('campus-layer:tokens');if(!raw)return '{\"need\":false}';var o=JSON.parse(raw);var j=(o.jwxt&&o.jwxt.token)||'';if(!j)return '{\"need\":false}';var b=j.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');var p=JSON.parse(decodeURIComponent(escape(atob(b))));var left=Math.round((p.exp*1000-Date.now())/60000);return JSON.stringify({need:left<120,leftMin:left});}catch(e){return '{\"need\":false}'}})()", value -> {
             String s = value == null ? "" : value;
             if (s.contains("\"need\":true")) {
-                startActivityForResult(new Intent(MainActivity.this, LoginActivity.class).putExtra("silent", true), REQ_LOGIN);
+                renewQuickly();
             }
         });
+    }
+
+    /**
+     * 续票的两级台阶：
+     * 1. {@link CasMint} 纯 Java 请求（不闪页面，200 ms 级）——扩展里那条 fetch 快路的原生版；
+     * 2. 换不到（CAS 会话真过期了）才让 LoginActivity 静默走一遍登录页，那里可能还得补一次 MFA。
+     */
+    private void renewQuickly() {
+        /* 必须按 /cas/ 这个路径取：TGC / SESSION / CAS_TRACE_ID 的 Path 都是 /cas/，
+           用站点根路径去问只会拿到空串（CookieManager 是按路径匹配的）。 */
+        final String cookies = CookieManager.getInstance().getCookie("https://cas.s.zzu.edu.cn/cas/");
+        new Thread(() -> {
+            final String link = CasMint.mint(cookies);
+            runOnUiThread(() -> {
+                if (link != null) {
+                    inject(link, false);
+                } else {
+                    startActivityForResult(
+                            new Intent(MainActivity.this, LoginActivity.class).putExtra("silent", true), REQ_LOGIN);
+                }
+            });
+        }, "cas-mint").start();
     }
 
     /** Android 13+ 通知要用户授权，没有就当场问一次。 */
@@ -256,10 +278,18 @@ public class MainActivity extends Activity {
 
     /** 把内容交给网页里的 PWA：window.__campusImport("…")，由它负责解析与报错。 */
     private void inject(String raw) {
+        inject(raw, true);
+    }
+
+    /** @param toast 静默续期时传 false，别在用户没操作的时候弹 Toast */
+    private void inject(String raw, boolean toast) {
         String js = "window." + AppConfig.IMPORT_FN + " && window." + AppConfig.IMPORT_FN
                 + "(" + quote(raw) + ")";
-        web.evaluateJavascript(js, value ->
-                Toast.makeText(this, "已交给页面处理", Toast.LENGTH_SHORT).show());
+        web.evaluateJavascript(js, value -> {
+            if (toast) {
+                Toast.makeText(this, "已交给页面处理", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     /** 最小可用的 JS 字符串字面量转义（token / URL 只含可打印字符，够用）。 */

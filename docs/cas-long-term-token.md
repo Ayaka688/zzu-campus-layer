@@ -289,7 +289,12 @@ GET https://cas.s.zzu.edu.cn/cas/s/login?service=https://uniapp.s.zzu.edu.cn/
 - 缓存节流：`mintIntoSession()` 60 秒内只发一次，避免并发请求各换一张。
 - 同一张 idToken **同时写进 `jwxt` 与 `portal` 两个槽位**（实测两边都认，见 §7）。
 - 扩展换不到（CAS 会话真没了）→ 退回 `renewFromCas()` 的标签页慢路 → 再不行就让用户重登。
-- PWA / 安卓壳没有 CORS 豁免，`canMintInBrowser()` 为 false，继续走壳里的
-  `LoginActivity(silent)`：WebView 的 CookieManager 里留着同一个 TGC，CAS 直接 302 带 ticket 回来，
-  用户看不到登录页（`maybeSilentRenew()` 在剩 <120 min 时触发）。
+- PWA / 安卓壳没有 CORS 豁免，`canMintInBrowser()` 为 false，走壳里的两级台阶：
+  1. **Java 快路** `mobile/.../CasMint.java`：`CookieManager.getCookie("https://cas.s.zzu.edu.cn/cas/")`
+     取出 TGC/SESSION/CAS_TRACE_ID，`HttpURLConnection` 关闭自动重定向，读 3xx 的 `Location`，
+     抠出 `ticket=` 后交给网页的 `__campusImport`。不打开任何页面，用户看不到闪烁。
+  2. **登录页慢路**：快路拿不到（CAS 会话真过期）才 `LoginActivity(silent=true)` 走一遍，
+     那里可能还要补一次短信/扫码 MFA。
+- 注意取 cookie 的路径必须是 `/cas/`：`CookieManager.getCookie()` 按路径匹配，
+  用站点根路径问会拿到空串，快路会静默失败（踩过一次）。
 
