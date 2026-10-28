@@ -52,7 +52,12 @@ public final class ReminderScheduler {
         return (int) (((at / 60_000L) * 37L + index) % Integer.MAX_VALUE);
     }
 
-    private static PendingIntent pendingFor(Context ctx, long at, int index, JSONObject o) {
+    /** 0.2.69 及更早的公式（只按时间点算），升级上来时要把它排的旧闹钟一并撤掉。 */
+    private static int legacyReqOf(long at) {
+        return (int) (at % Integer.MAX_VALUE);
+    }
+
+    private static PendingIntent pendingFor(Context ctx, int req, long at, JSONObject o) {
         Intent i2 = new Intent(ctx, ReminderReceiver.class);
         if (o != null) {
             i2.putExtra("title", o.optString("title", "快到上课时间了"));
@@ -60,7 +65,7 @@ public final class ReminderScheduler {
             i2.putExtra("at", at);
         }
         return PendingIntent.getBroadcast(
-                ctx, reqOf(at, index), i2,
+                ctx, req, i2,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
@@ -80,7 +85,9 @@ public final class ReminderScheduler {
             long at = o.optLong("at", 0);
             if (at <= 0) continue;
             try {
-                am.cancel(pendingFor(ctx, at, i, null));
+                am.cancel(pendingFor(ctx, reqOf(at, i), at, null));
+                // 旧版本用 at % MAX 当 requestCode，留着会继续按「合并版」文案弹
+                am.cancel(pendingFor(ctx, legacyReqOf(at), at, null));
             } catch (Exception ignored) {
                 /* 撤不掉也不影响新闹钟 */
             }
@@ -110,7 +117,7 @@ public final class ReminderScheduler {
             long at = o.optLong("at", 0);
             if (at <= now + 60_000L) continue; // 已经过点了，别补弹
 
-            PendingIntent pi = pendingFor(ctx, at, i, o);
+            PendingIntent pi = pendingFor(ctx, reqOf(at, i), at, o);
             try {
                 if (exact) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi);
