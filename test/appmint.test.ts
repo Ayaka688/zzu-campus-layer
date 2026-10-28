@@ -17,7 +17,7 @@ import {
   rsaEncrypt,
   type AppCreds,
 } from '../src/core/appMint';
-import { clearAppCreds, getAppCreds, newDeviceId, saveAppCreds } from '../src/core/creds';
+import { clearAppCreds, getAppCreds, markCredsTrusted, newDeviceId, saveAppCreds } from '../src/core/creds';
 
 const keyPair = generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -239,5 +239,27 @@ describe('creds 存储', () => {
 
   it('newDeviceId 每次不同', () => {
     expect(newDeviceId()).not.toBe(newDeviceId());
+  });
+
+  it('短信验证通过后记一笔 trustedAt，同设备再保存时保留', async () => {
+    await saveAppCreds({ account: 'a', password: 'p' });
+    const trusted = await markCredsTrusted(1_700_000_000_000);
+    expect(trusted?.trustedAt).toBe(1_700_000_000_000);
+    // 改密码不动信任标记
+    const again = await saveAppCreds({ password: 'p2' });
+    expect(again.trustedAt).toBe(1_700_000_000_000);
+    expect((await getAppCreds())?.trustedAt).toBe(1_700_000_000_000);
+  });
+
+  it('换了 deviceId 信任标记就作废（新设备还得再验一次）', async () => {
+    await saveAppCreds({ account: 'a', password: 'p' });
+    await markCredsTrusted();
+    const other = await saveAppCreds({ deviceId: 'zzu-layer-0000000000000000' });
+    expect(other.deviceId).toBe('zzu-layer-0000000000000000');
+    expect(other.trustedAt).toBeUndefined();
+  });
+
+  it('没绑定时 markCredsTrusted 什么都不做', async () => {
+    expect(await markCredsTrusted()).toBeNull();
   });
 });

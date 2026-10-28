@@ -331,7 +331,7 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 | 29 | 蓝绿（teal）配色：模型气泡由白色 `--panel` 改为同族墨绿不透明面、正文近白、去掉半透明 | `html[data-theme='teal'] .bubble` 一组覆盖 |
 | 30 | 更新链路：`pwa-sw.js` 缓存名 `campus-layer-v8` + `skipWaiting`/`clients.claim`；注册 `{ updateViaCache: 'none' }` + `reg.update()` + 新 SW 就绪后自动 reload；壳在版本号变化时 `web.clearCache(true)` | 线上核对：`assets/pwa-*.js` 内含当前版本号；壳杀进程重开后版本号前进 |
 | 31 | 续票换成**账密直换 30 天票**（学校 App 的 `/token/` 端点族）：`appMint.ts` 手写 RSA PKCS#1 v1.5 + `fetch`；`deviceId` 过一次短信即成为可信设备，之后零人工；扩展/安卓壳（`AppMint.java`）/CLI（`scripts/app-*.mjs`）三处共用同一协议 | `test/appmint.test.ts` 19 例（含用 Node `privateDecrypt` 解回原文）；实网 74–113 ms、720 h、eams-door 200；`cas:*` 降级为兜底 |
-| 32 | **绑定向导**（0.2.72）：手机 App 里就能把 `deviceId` 登记成可信设备，不必再开电脑跑 CLI。页面 `<AppCreds />` → 填账密 → 点「绑定」→ 壳发短信（`AppBind.java`）→ 填 4~6 位码 → 校验通过顺手换一张 30 天票写进两个槽位；扩展里同一套流程换成本地 `fetch`（`appBind.ts`），壳里走 `CampusNotify.appBindStart/appBindSubmit` ↔ `window.__campusBind` | `test/appbind.test.ts` 16 例（init→send→valid 顺序与 body、status 2/3 翻译、限流与网络错、壳桥 code/done/error/超时、`canBindInShell()` 在无窗口环境为 false）；`creds.ts` 增 `trustedAt`，换 deviceId 自动作废；`tsc` 0 错、530 passed / 12 skipped（39 文件） |
+| 32 | **绑定向导**（0.2.72）：手机 App 里就能把 `deviceId` 登记成可信设备，不必再开电脑跑 CLI。页面 `<AppCreds />` → 填账密 → 点「绑定」→ 壳发短信（`AppBind.java`）→ 填 4~6 位码 → 校验通过顺手换一张 30 天票写进两个槽位；扩展里同一套流程换成本地 `fetch`（`appBind.ts`），壳里走 `CampusNotify.appBindStart/appBindSubmit` ↔ `window.__campusBind` | `test/appbind.test.ts` 16 例（init→send→valid 顺序与 body、status 2/3 翻译、限流与网络错、壳桥 code/done/error/超时、`canBindInShell()` 在无窗口环境为 false）；`creds.ts` 增 `trustedAt`，换 deviceId 自动作废；`tsc` 0 错、533 passed / 12 skipped（39 文件） |
 
 **本轮仍未做（明确记录）**
 - 图书馆座位图依赖该站自身登录态（与学校 CAS 是两套账号），且**同一时间只允许一台设备在线**；
