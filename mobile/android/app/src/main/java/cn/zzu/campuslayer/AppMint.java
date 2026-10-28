@@ -6,7 +6,6 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.math.BigInteger;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -235,18 +234,14 @@ final class AppMint {
                 ps[i] = 0x01; // 填充字节必须非零
             }
         }
-        ByteArrayOutputStream em = new ByteArrayOutputStream(k);
-        em.write(0x00);
-        em.write(0x01);
-        try {
-            OutputStream o = em;
-            o.write(ps);
-            o.write(0x00);
-            o.write(msg);
-        } catch (Exception ignored) {
-            // ByteArrayOutputStream 不会抛
-        }
-        BigInteger m = new BigInteger(1, em.toByteArray());
+        // EM = 0x00 || 0x01 || PS(0xFF…) || 0x00 || M ，总长固定 k 字节
+        byte[] em = new byte[k];
+        em[0] = 0x00;
+        em[1] = 0x01;
+        System.arraycopy(ps, 0, em, 2, ps.length);
+        em[2 + ps.length] = 0x00;
+        System.arraycopy(msg, 0, em, 3 + ps.length, msg.length);
+        BigInteger m = new BigInteger(1, em);
         byte[] c = m.modPow(key.e, key.n).toByteArray();
         // 左侧补零到固定长度（去掉 BigInteger 的符号位）
         byte[] fixed = new byte[k];

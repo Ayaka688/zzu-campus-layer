@@ -224,6 +224,13 @@ public class MainActivity extends Activity {
      * 3. 都不行才让 LoginActivity 静默走一遍登录页，那里可能还得补一次 MFA。
      */
     private void renewQuickly() {
+        renewQuickly(false);
+    }
+
+    /**
+     * @param userAsked 用户自己点的「立即续期」（要弹「续期成功/失败」），而不是静默兜底
+     */
+    private void renewQuickly(boolean userAsked) {
         if (web == null) {
             return;
         }
@@ -245,8 +252,18 @@ public class MainActivity extends Activity {
                         final String out = link;
                         runOnUiThread(() -> {
                             if (out != null) {
+                                if (userAsked) {
+                                    Toast.makeText(MainActivity.this, "登录态已刷新", Toast.LENGTH_SHORT).show();
+                                    web.evaluateJavascript(
+                                            "window.__campusRenew&&window.__campusRenew('ok')", null);
+                                }
                                 inject(out, false);
                             } else {
+                                // 静默那条路不打扰用户；用户自己点的那条要让他知道接下来可能要 MFA
+                                renewing = userAsked;
+                                if (userAsked) {
+                                    Toast.makeText(MainActivity.this, "需要在学校登录页确认一次", Toast.LENGTH_SHORT).show();
+                                }
                                 startActivityForResult(new Intent(MainActivity.this, LoginActivity.class)
                                         .putExtra("silent", true), REQ_LOGIN);
                             }
@@ -363,9 +380,7 @@ public class MainActivity extends Activity {
     /** 菜单「立即续期」：不管剩多久，立刻走一次静默续期，用来当场验证。 */
     private void forceRenew() {
         Toast.makeText(this, "正在后台续期…", Toast.LENGTH_SHORT).show();
-        renewing = true;
-        startActivityForResult(new Intent(MainActivity.this, LoginActivity.class)
-                .putExtra("silent", true), REQ_LOGIN);
+        renewQuickly(true);
     }
 
     private void openLogin() {
