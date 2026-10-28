@@ -408,6 +408,34 @@ npm run app:ticket -- --json       # {"idToken": "…", "leftH": 719.9, …}
 - **短信有频率限制**：一分钟内连点会回「验证码发送过于频繁，请稍后再试」，界面上会原样显示这句。
   校验失败不消耗设备登记（可以重发、重填）；校验成功才登记，登记后这条 `gid` 就作废了。
 
+#### 10.5.1 踩过的坑：点「绑定」直接闪退（0.2.72 → 0.2.73）
+
+0.2.72 在真机上第一次点「绑定」就闪退，根因是**手写的 DER 解析少跳了一层**：
+
+```
+SPKI = SEQ { SEQ { OID, NULL }, BIT STRING { SEQ { INT n, INT e } } }
+               ^^^^^^^^^^^^^^^^  AlgorithmIdentifier（0.2.72 把它的第一个孩子 OID 当成了 BIT STRING）
+```
+
+于是「长度」被当成 OID 里的某个字节读出来（实测 `1472509587`），接着
+`new byte[1472509587]`（约 1.4 GB）抛的是 **`OutOfMemoryError`**——它是 `Error` 不是 `Exception`，
+从 `catch (Exception)` 底下漏出去，在 `bind-start` 线程里没人接 → 进程被系统带走。
+
+修法（0.2.73）：
+
+1. `AppMint.parseKey()` 改成按 `alg.bodyStart + alg.length` 跳过整个 AlgorithmIdentifier 再取 BIT STRING；
+2. `readTlv()` / `sub()` 加严格边界（`len` 必须落在数组内、长度字段最多 4 字节），越界抛 `IllegalArgumentException`
+   而不是按那个数字去分配；
+3. `parseKey` / `mint` / `AppBind.start` / `AppBind.submit` / 桥方法全部改 `catch (Throwable)`；
+   `pushBind()` 也包起来（页面正在重载时 `evaluateJavascript` 会抛）；
+4. 新增 `CrashLog.java`：`Thread.setDefaultUncaughtExceptionHandler` 把栈记进 SharedPreferences
+   （**记完仍交回系统原 handler**，不吞异常），页面通过 `CampusNotify.lastCrash()` 读出来显示在设置块里；
+5. `test/appmint.test.ts` 加了三条边界用例（DER 截断、长度字段指到数组外、取出来的必须是真 2048 位 n），
+   把这层「少跳一层」的错钉死在 TS 侧。
+
+教训：**`catch (Exception)` 挡不住 `Error`**；手写二进制解析一定要先把长度和数组边界对上，
+再谈分配内存。安卓侧没有本地 JDK，这类错只能靠 CI 编译 + 真机点一次才发现，所以干脆把崩溃栈也带回来了。
+
 ### 10.6 与旧方案的关系
 
 | | §2–§9（`/cas/` + TGC） | §10（`/token/` + 账密） |

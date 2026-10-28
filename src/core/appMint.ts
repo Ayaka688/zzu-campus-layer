@@ -87,16 +87,22 @@ interface Tlv {
 }
 
 function readTlv(buf: Uint8Array, pos: number): Tlv {
+  if (pos < 0 || pos + 2 > buf.length) throw new Error('DER 越界');
   const tag = buf[pos] ?? 0;
   let p = pos + 1;
   let len = buf[p] ?? 0;
   p += 1;
   if (len & 0x80) {
     const count = len & 0x7f;
+    if (count === 0 || count > 4) throw new Error('DER 长度字段不支持');
     len = 0;
-    for (let i = 0; i < count; i += 1) len = (len << 8) | (buf[p + i] ?? 0);
+    for (let i = 0; i < count; i += 1) {
+      if (p + i >= buf.length) throw new Error('DER 长度越界');
+      len = (len << 8) | (buf[p + i] ?? 0);
+    }
     p += count;
   }
+  if (len < 0 || p + len > buf.length) throw new Error('DER 内容越界');
   return { tag, bodyStart: p, bodyEnd: p + len };
 }
 

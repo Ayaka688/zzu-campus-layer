@@ -84,6 +84,8 @@ public class MainActivity extends Activity {
         }
         web.addJavascriptInterface(new NotifyBridge(), "CampusNotify");
 
+        CrashLog.install(this);
+
         web.loadUrl(AppConfig.APP_URL);
 
         askNotificationPermission();
@@ -210,7 +212,13 @@ public class MainActivity extends Activity {
         public void appBindStart(String credsJson) {
             final String json = credsJson == null ? "" : credsJson;
             new Thread(() -> {
-                final String result = AppBind.start(json);
+                String out;
+                try {
+                    out = AppBind.start(json);
+                } catch (Throwable t) {
+                    out = bindError(t);
+                }
+                final String result = out;
                 runOnUiThread(() -> pushBind(result));
             }, "bind-start").start();
         }
@@ -220,19 +228,46 @@ public class MainActivity extends Activity {
         public void appBindSubmit(String code) {
             final String digits = code == null ? "" : code;
             new Thread(() -> {
-                final String result = AppBind.submit(digits);
+                String out;
+                try {
+                    out = AppBind.submit(digits);
+                } catch (Throwable t) {
+                    out = bindError(t);
+                }
+                final String result = out;
                 runOnUiThread(() -> pushBind(result));
             }, "bind-submit").start();
         }
+
+        /** 上次崩溃的栈文本（没崩过就是空串）；页面把它显示出来，用户能直接复制给开发者。 */
+        @JavascriptInterface
+        public String lastCrash() {
+            return CrashLog.last(MainActivity.this);
+        }
+
+        /** 用户点「已读」后清掉，免得老崩溃一直挂在设置页。 */
+        @JavascriptInterface
+        public void clearCrash() {
+            CrashLog.clear(MainActivity.this);
+        }
+    }
+
+    /** 后台线程里的兜底：任何 Throwable 都变成一条给页面看的错误，绝不让进程退。 */
+    private static String bindError(Throwable t) {
+        return "{\"step\":\"error\",\"message\":\"壳里出错：" + t.getClass().getSimpleName() + "\"}";
     }
 
     /** 把绑定向导的一步结果交回页面。 */
     private void pushBind(String json) {
-        if (web == null) {
+        if (web == null || json == null) {
             return;
         }
-        web.evaluateJavascript(
-                "window.__campusBind&&window.__campusBind(" + org.json.JSONObject.quote(json) + ")", null);
+        try {
+            web.evaluateJavascript(
+                    "window.__campusBind&&window.__campusBind(" + org.json.JSONObject.quote(json) + ")", null);
+        } catch (Throwable ignored) {
+            // 页面刚好在重载 / WebView 已销毁：丢掉这一步就行，别为它崩掉整个 App
+        }
     }
 
     /**

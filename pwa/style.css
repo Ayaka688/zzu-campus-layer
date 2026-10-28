@@ -362,6 +362,22 @@ main {
   color: #f0b429;
 }
 
+/* 壳里记下来的崩溃栈（用户要能一眼看清、复制走） */
+.llm-fields .crash {
+  margin: 6px 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--muted, #98a0ae);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+}
+
 .hint.ok {
   color: #3fb950;
 }

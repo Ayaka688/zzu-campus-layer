@@ -164,6 +164,8 @@ interface ShellBindBridge {
   appBindStart?(credsJson: string): void;
   appBindSubmit?(code: string): void;
   appBindCancel?(): void;
+  lastCrash?(): string;
+  clearCrash?(): void;
 }
 
 interface Shell {
@@ -233,4 +235,32 @@ export async function submitCodeInShell(code: string, timeoutMs = 25_000): Promi
   if (step.step === 'error') return { ok: false, reason: 'code', detail: step.message };
   if (step.step === 'done') return { ok: true, ...(step.idToken ? { idToken: step.idToken } : {}) };
   return { ok: false, reason: 'code', detail: '码还没过' };
+}
+
+/**
+ * 壳上次「闪退」的栈文本（壳里才有）。没有崩溃过、或不在壳里都返回空串。
+ *
+ * <p>手机上没有 logcat，用户能提供的只有一句「闪退了」；把栈摆到设置页里，
+ * 至少能让下一次排障有据可查。
+ */
+export function shellLastCrash(): string {
+  const bridge = shell()?.CampusNotify;
+  if (typeof bridge?.lastCrash !== 'function') return '';
+  try {
+    const text = bridge.lastCrash();
+    return typeof text === 'string' ? text : '';
+  } catch {
+    return '';
+  }
+}
+
+/** 用户点「已读」后清掉壳里记的崩溃文本。 */
+export function clearShellCrash(): void {
+  const bridge = shell()?.CampusNotify;
+  if (typeof bridge?.clearCrash !== 'function') return;
+  try {
+    bridge.clearCrash();
+  } catch {
+    // 壳版本老、没这个方法：忽略
+  }
 }

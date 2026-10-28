@@ -13,6 +13,8 @@ import { canMintInBrowser } from '../core/casMint';
 import { mintViaApp } from '../core/appMint';
 import {
   canBindInShell,
+  clearShellCrash,
+  shellLastCrash,
   startBind,
   startBindInShell,
   submitCode,
@@ -55,6 +57,7 @@ export function AppCreds({ browserOnly = false }: Props) {
   const [note, setNote] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [code, setCode] = useState('');
+  const [crash, setCrash] = useState('');
 
   const mode = bindMode();
 
@@ -64,6 +67,8 @@ export function AppCreds({ browserOnly = false }: Props) {
       setSaved(got);
       if (got) setAccount(got.account);
     })();
+    // 壳里上一次闪退留下的栈：摆出来，用户能直接复制给开发者（手机上没有 logcat）
+    setCrash(shellLastCrash().trim());
   }, []);
 
   /** 拿到票就写两个槽位（实测同一张 idToken 教务与门户都认）。 */
@@ -272,6 +277,21 @@ export function AppCreds({ browserOnly = false }: Props) {
         </p>
       )}
       {phase.kind === 'done' && <p class="hint ok">绑定完成 ✅ 之后票快到期时，纯账密就能静默换新票。</p>}
+      {crash !== '' && (
+        <div class="hint warn">
+          <p>上次闪退了，壳记下来的栈是：</p>
+          <pre class="crash">{crash.length > 900 ? `${crash.slice(0, 900)}…` : crash}</pre>
+          <button
+            class="mini"
+            onClick={() => {
+              clearShellCrash();
+              setCrash('');
+            }}
+          >
+            已读，清掉
+          </button>
+        </div>
+      )}
     </div>
   );
 }

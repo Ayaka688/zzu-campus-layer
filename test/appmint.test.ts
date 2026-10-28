@@ -88,6 +88,28 @@ describe('RSA PKCS#1 v1.5', () => {
     const key = parsePublicKey(keyPair.publicKey);
     expect(() => rsaEncrypt(key, 'x'.repeat(250))).toThrow(/明文太长/);
   });
+
+  /* SPKI 的走法是 SEQ{ SEQ{OID,NULL}, BIT STRING{ SEQ{n,e} } }：
+     少跳一层就会把 OID 当成 BIT STRING，读出来的「长度」是个天文数字。
+     Java 侧 AppMint.parseKey 正是这么错的——拿去 new byte[1.4GB]，
+     抛的是 OutOfMemoryError（Error，不是 Exception），于是漏过所有 catch，
+     在壳里表现成「点绑定就闪退」。这里把边界钉住，两边都别再踩。 */
+  const der = base64Decode(keyPair.publicKey.replace(/-----[^-]*-----/g, '').replace(/\s+/g, ''));
+
+  it('公钥 DER 被截断就抛错，而不是返回一个垃圾 n', () => {
+    expect(() => parsePublicKey(base64Encode(der.slice(0, 120)))).toThrow();
+  });
+
+  it('长度字段指向数组之外也抛错（不许按那个长度去分配）', () => {
+    const bad = new Uint8Array([0x30, 0x84, 0xff, 0xff, 0xff, 0xff, 0x00]);
+    expect(() => parsePublicKey(base64Encode(bad))).toThrow();
+  });
+
+  it('取出来的是真 n（2048 位），不是误取到的 OID', () => {
+    const key = parsePublicKey(base64Encode(der));
+    expect(key.n > 2n ** 2047n).toBe(true);
+    expect(key.e).toBe(65537n);
+  });
 });
 
 /** 造一张假 idToken（只要 payload 里有 exp 就够 decodeJwt 用） */

@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   APP_ATTEST,
   canBindInShell,
+  clearShellCrash,
   initSecurePhone,
+  shellLastCrash,
   startBind,
   startBindInShell,
   submitCode,
@@ -229,5 +231,45 @@ describe('壳里的那条路', () => {
     if (out.ok) return;
     expect(out.detail).toMatch(/超时/);
     expect(w.__campusBind).toBeUndefined();
+  });
+
+  it('壳里有崩溃记录就读得到（手机上没 logcat，只能靠这条链）', () => {
+    let cleared = false;
+    const w = {
+      CampusNotify: {
+        appBindStart: () => {},
+        appBindSubmit: () => {},
+        lastCrash: () => 'OutOfMemoryError: Failed to allocate\n  at cn.zzu...',
+        clearCrash: () => {
+          cleared = true;
+        },
+      },
+    };
+    (globalThis as { window?: unknown }).window = w;
+    expect(shellLastCrash()).toMatch(/OutOfMemoryError/);
+    clearShellCrash();
+    expect(cleared).toBe(true);
+  });
+
+  it('老壳没有这两个方法时返回空串、也不报错', () => {
+    (globalThis as { window?: unknown }).window = { CampusNotify: { appBindStart: () => {} } };
+    expect(shellLastCrash()).toBe('');
+    expect(() => clearShellCrash()).not.toThrow();
+  });
+
+  it('壳的方法抛异常也只当没有', () => {
+    (globalThis as { window?: unknown }).window = {
+      CampusNotify: {
+        appBindStart: () => {},
+        lastCrash: () => {
+          throw new Error('boom');
+        },
+        clearCrash: () => {
+          throw new Error('boom');
+        },
+      },
+    };
+    expect(shellLastCrash()).toBe('');
+    expect(() => clearShellCrash()).not.toThrow();
   });
 });

@@ -32,3 +32,4 @@ tmp/
 .env.*
 *.bak
 .audit.json
+/tmp-*.txt

@@ -89,7 +89,8 @@ final class AppMint {
             JSONObject ldata = login.optJSONObject("data");
             String idToken = ldata == null ? "" : ldata.optString("idToken", "");
             return idToken.isEmpty() ? null : idToken;
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // Throwable：不让任何解析/网络错误把进程带走
             return null;
         }
     }
@@ -184,40 +185,61 @@ final class AppMint {
             } else {
                 der = Base64.decode(body.trim(), Base64.DEFAULT);
             }
-            // SubjectPublicKeyInfo: SEQUENCE { SEQUENCE { OID, NULL }, BIT STRING { SEQUENCE { INT n, INT e } } }
+            // SubjectPublicKeyInfo: SEQ { SEQ { OID, NULL }, BIT STRING { SEQ { INT n, INT e } } }
             int[] seq = readTlv(der, 0);
-            int[] inner = readTlv(der, seq[2]);
-            int[] bitStr = readTlv(der, inner[2]);
+            int[] alg = readTlv(der, seq[2]);              // AlgorithmIdentifier（含 OID 与 NULL）
+            int[] bitStr = readTlv(der, alg[2] + alg[1]);  // 跳过整个 AlgorithmIdentifier 才是 BIT STRING
             // BIT STRING 内容首字节是「未使用位数」，跳过它
             int[] rsa = readTlv(der, bitStr[2] + 1);
             int[] nTlv = readTlv(der, rsa[2]);
-            int[] eTlv = readTlv(der, nTlv[2]);
-            BigInteger n = new BigInteger(sub(der, nTlv[2], nTlv[2] + nTlv[1]));
-            BigInteger e = new BigInteger(sub(der, eTlv[2], eTlv[2] + eTlv[1]));
+            int[] eTlv = readTlv(der, nTlv[2] + nTlv[1]);
+            BigInteger n = new BigInteger(sub(der, nTlv[2], nTlv[1]));
+            BigInteger e = new BigInteger(sub(der, eTlv[2], eTlv[1]));
+            if (n.bitLength() < 512 || e.bitLength() > 64) {
+                return null;
+            }
             return new RsaPublicKey(n, e);
-        } catch (Exception ex) {
+        } catch (Throwable ex) {
+            // 注意这里是 Throwable：曾经因为长度解错，sub() 去 new byte[1.4GB]
+            // 抛 OutOfMemoryError（Error 不是 Exception），从 catch (Exception) 漏出去，
+            // 直接把进程带走（表现就是「点绑定就闪退」）。
             return null;
         }
     }
 
-    /** 读一个 DER TLV，返回 {tag, length, contentStart}。 */
+    /** 读一个 DER TLV，返回 {tag, length, contentStart}；越界一律当解析失败。 */
     private static int[] readTlv(byte[] b, int off) {
+        if (b == null || off < 0 || off + 2 > b.length) {
+            throw new IllegalArgumentException("DER 越界");
+        }
         int tag = b[off] & 0xff;
         int p = off + 1;
         int len = b[p++] & 0xff;
         if ((len & 0x80) != 0) {
             int n = len & 0x7f;
+            if (n == 0 || n > 4) {
+                throw new IllegalArgumentException("DER 长度字段不支持");
+            }
             len = 0;
             for (int i = 0; i < n; i++) {
+                if (p >= b.length) {
+                    throw new IllegalArgumentException("DER 长度越界");
+                }
                 len = (len << 8) | (b[p++] & 0xff);
             }
+        }
+        if (len < 0 || p + len > b.length) {
+            throw new IllegalArgumentException("DER 内容越界");
         }
         return new int[]{tag, len, p};
     }
 
-    private static byte[] sub(byte[] b, int from, int to) {
-        byte[] out = new byte[to - from];
-        System.arraycopy(b, from, out, 0, out.length);
+    private static byte[] sub(byte[] b, int from, int len) {
+        if (len <= 0 || from < 0 || from + len > b.length) {
+            throw new IllegalArgumentException("DER 切片越界");
+        }
+        byte[] out = new byte[len];
+        System.arraycopy(b, from, out, 0, len);
         return out;
     }
 

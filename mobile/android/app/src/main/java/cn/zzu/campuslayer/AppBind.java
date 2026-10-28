@@ -105,7 +105,7 @@ final class AppBind {
             out.put("state", state);
             out.put("gid", gid);
             return out.toString();
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return error(e.getClass().getSimpleName() + (e.getMessage() == null ? "" : "：" + e.getMessage()));
         }
     }
@@ -138,7 +138,7 @@ final class AppBind {
                 return error("设备登记成功，但换票没成（网络？）");
             }
             return done(token);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return error(e.getClass().getSimpleName() + (e.getMessage() == null ? "" : "：" + e.getMessage()));
         }
     }
