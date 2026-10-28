@@ -68,6 +68,8 @@ export interface TokenStatus {
   valid: boolean;
   expText?: string;
   remainingText?: string;
+  /** 剩余有效期（毫秒），给「快到期就续一下」判断用 */
+  remainingMs?: number;
 }
 
 function humanRemaining(ms: number): string {
@@ -95,6 +97,7 @@ export async function tokenStatuses(now = Date.now()): Promise<TokenStatus[]> {
       valid: meta.valid,
       ...(meta.expMs !== undefined ? { expText: fmt(meta.expMs) } : {}),
       ...(meta.remainingMs !== undefined ? { remainingText: humanRemaining(meta.remainingMs) } : {}),
+      ...(meta.remainingMs !== undefined ? { remainingMs: meta.remainingMs } : {}),
     };
   });
 }

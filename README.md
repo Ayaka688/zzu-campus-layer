@@ -315,7 +315,11 @@ npm run pwa:quick     # 只验常用语那排药丸：加/排序/删/恢复默�
 npm run pwa:transcript # 只验聊天记录：塞 14 条→只显示后 10 条→再发一句→仍然 10 条→刷新还在
 npm run test:live     # 实网：读 tmp/zzu/*.txt 里的 token（见下）
 npm run pwa:serve     # 本地起 http://127.0.0.1:8899 看 PWA
+npm run cas:login     # 一次人工：CAS 密码 + 短信/扫码 MFA → 存 TGC 到 .cas-state/
+npm run cas:ticket    # 之后每次：用 TGC 静默换 X-Id-Token（8 小时一张，无人工）
 ```
+
+`cas:login` / `cas:ticket` 是新教务 `X-Id-Token` 的纯 Node 换票链路（不经浏览器、不需要 CAS 页面常驻）。协议细节与踩过的坑见 [docs/cas-long-term-token.md](docs/cas-long-term-token.md)。
 
 实网测试需要你自己的登录态，放在仓库根下 `tmp/zzu/`（已在 `.gitignore`）：
 

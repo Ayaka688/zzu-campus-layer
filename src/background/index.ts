@@ -28,7 +28,7 @@ import {
   setWatchState,
 } from '../core/storage';
 import { mintApiKey, probeLlm, resolveProvider } from '../core/llm';
-import { ensureRenewed, hasUsableToken } from '../core/renew';
+import { ensureFresh, ensureRenewed, hasUsableToken } from '../core/renew';
 import { bookLibrarySeat, findLibraryTab } from '../core/libtab';
 import { describeBook, type BookOutcome } from '../core/libBook';
 import { TOOLS, getNoticeBody, runTool } from '../core/tools';
@@ -63,13 +63,15 @@ chrome.runtime.onInstalled.addListener(installSidePanelBehaviour);
 chrome.runtime.onStartup.addListener(installSidePanelBehaviour);
 
 /**
- * 取登录态；手上的票全过期了，就先试着用 CAS 会话自动续一次
- * （浏览器里 CAS 勾了「记住我」才续得上，续不上就照旧提示去登录）。
+ * 取登录态；票快到期（<2 h）或已经废了，就先自己续一次
+ * （扩展里是一条 fetch 的静默换票；PWA 里退回后台标签页）。
+ * 一张票都没有说明还没登录过——不空跑，直接返回现状让 UI 提示去登录。
  */
 async function sessionOrRenew(): Promise<CampusSession> {
   const session = await loadSession();
-  if (hasUsableToken(await tokenStatuses())) return session;
-  if (!(await ensureRenewed())) return session;
+  if (!session.jwxtToken && !session.portalToken) return session;
+  // 剩得还多就什么都不做（ensureFresh 内部判断，不发请求）
+  await ensureFresh();
   return loadSession();
 }
 
@@ -227,6 +229,9 @@ const MAX_PUSHES_PER_DAY = 3;
  * - 每天最多 `MAX_PUSHES_PER_DAY` 次。
  */
 async function dailyWatch(): Promise<void> {
+  // 6 小时一次的这个闹钟顺便当「保鲜」：票剩不到 2 小时就静默换一张
+  // （扩展里只要一条 fetch，不占标签页；换不上就算了，别拦着下面的推送）
+  await ensureFresh();
   const session = await loadSession();
   if (!session.jwxtToken && !session.portalToken) return;
 

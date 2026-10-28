@@ -332,6 +332,10 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
   const jwxt = statuses.find((s) => s.source === 'jwxt');
   const portal = statuses.find((s) => s.source === 'portal');
   const ready = Boolean(jwxt?.valid || portal?.valid);
+  /* 票是 8 小时的；剩不到 2 小时就先续，别等它过期了再补救 */
+  const NEAR_EXPIRY_MS = 2 * 3_600_000;
+  const shouldRenewNow =
+    Boolean(jwxt?.present) && (!jwxt?.valid || (jwxt?.remainingMs ?? Number.POSITIVE_INFINITY) < NEAR_EXPIRY_MS);
   useEffect(() => {
     if (ready) void loadNotices();
   }, [ready]);
@@ -370,8 +374,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
         return;
       }
       /* 开销很小：只剩 0 次续期机会时也照样先问一次（用户可能刚在别处续过） */
-      if (jwxt && !jwxt.valid && canAutoRenew()) {
-        setNote('登录态过期了，正在自动续期…');
+      if (shouldRenewNow && canAutoRenew()) {
+        setNote(jwxt?.valid ? '登录态快到期了，先自动续一次…' : '登录态过期了，正在自动续期…');
         const ok = await renewOnce();
         setNote(ok ? '续期成功' : '');
         if (!ok) {
