@@ -138,7 +138,7 @@ public class LoginActivity extends Activity {
                     String raw = clean(value);
                     String[] parts = raw.isEmpty() ? new String[0] : raw.split("\n");
                     String local = parts.length > 1 && isJwt(parts[1]) ? parts[1] : "";
-                    String fromUrl = !urlTicket.isEmpty() ? ticketPayload(urlTicket)
+                    String fromUrl = !urlTicket.isEmpty() ? urlTicketValue()
                             : (parts.length > 0 ? ticketPayload(parts[0]) : "");
                     String best = waitForLocal(local, fromUrl);
                     if (best != null) {
@@ -232,6 +232,41 @@ public class LoginActivity extends Activity {
         return urlTicket.isEmpty() ? fromUrl : null;
     }
 
+    /** 已经解好的长票（或原始 URL）。 */
+    private String urlTicketValue() {
+        return isJwt(urlTicket) ? urlTicket : ticketPayload(urlTicket);
+    }
+
+    /** CAS 回跳的 ticket 本身是个 JWT，payload 里带着真正的 idToken（学校 App 就是这么解的）。 */
+    private static String idTokenFromTicket(String url) {
+        String tk = url == null ? "" : url;
+        int i = tk.indexOf("ticket=");
+        if (i < 0) return "";
+        tk = tk.substring(i + 7);
+        int a = tk.indexOf('&');
+        if (a >= 0) tk = tk.substring(0, a);
+        a = tk.indexOf('#');
+        if (a >= 0) tk = tk.substring(0, a);
+        String[] parts = tk.split("\\.");
+        if (parts.length < 2) return "";
+        try {
+            String b64 = parts[1].replace('-', '+').replace('_', '/');
+            int pad = (4 - b64.length() % 4) % 4;
+            StringBuilder sb = new StringBuilder(b64);
+            for (int k = 0; k < pad; k++) sb.append('=');
+            byte[] raw = android.util.Base64.decode(sb.toString(), android.util.Base64.DEFAULT);
+            String json = new String(raw, "UTF-8");
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"idToken\"\\s*:\\s*\"([^\"]+)\"").matcher(json);
+            if (m.find()) {
+                String inner = m.group(1);
+                return isJwt(inner) ? inner : "";
+            }
+        } catch (Throwable ignored) {
+        }
+        return "";
+    }
+
     /** 两个候选里选剩余时间更长的；都不行返回 null。 */
     private static String pickLonger(String local, String fromUrl) {
         double l = isJwt(local) ? leftHours(local) : -1;
@@ -265,8 +300,8 @@ public class LoginActivity extends Activity {
                 tk = tk.substring(0, amp);
             }
             if (tk.indexOf('.') > 0) {
-                urlTicket = url;
-                // 别拦这次跳转：门户 SPA 必须自己处理 ?ticket= 才会把长票写进 localStorage。
+                String inner = idTokenFromTicket(url);
+                urlTicket = inner.isEmpty() ? url : inner;
                 return false;
             }
             return false;
