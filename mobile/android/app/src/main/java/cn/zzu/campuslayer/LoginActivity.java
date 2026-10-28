@@ -266,8 +266,8 @@ public class LoginActivity extends Activity {
             }
             if (tk.indexOf('.') > 0) {
                 urlTicket = url;
-                goPortal();
-                return true;
+                // 别拦这次跳转：门户 SPA 必须自己处理 ?ticket= 才会把长票写进 localStorage。
+                return false;
             }
             return false;
         }
