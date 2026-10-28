@@ -584,6 +584,9 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
     if (next) {
       await ensureNotifyPermission();
       void syncReminders();
+    } else {
+      // 关掉的时候把壳里已排的闹钟一起撤了，不然明天早上还会响
+      pushReminders([]);
     }
     setNote(next ? '已开启课前提醒' : '已关闭课前提醒');
     setTimeout(() => setNote(''), 2500);
@@ -834,7 +837,7 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
               checked={notifyClass}
               onChange={(e) => void toggleClass((e.target as HTMLInputElement).checked)}
             />
-            <span>课前提醒（上课前 30 分钟，连着上的课合成一条）</span>
+            <span>课前提醒（每节课开课前 30 分钟各弹一条）</span>
           </label>
           <label class="row" style="align-items:center;gap:8px">
             <input

@@ -8,8 +8,8 @@ export interface ReminderBlock {
   body: string;
 }
 
-const GAP_MIN = 40; // 两节之间空档 ≤ 40 分钟就算"连着上"（本校 1-2 节与 3-4 节之间是 30 分钟；午休 130 分钟不会被并进来）
-const LEAD_MIN = 30; // 提前 30 分钟提醒
+/** 提前多少分钟提醒：每节课开课前 30 分钟各弹一条。 */
+export const LEAD_MIN = 30;
 
 function hhmmToMin(v: string): number {
   const [h, m] = v.split(':');
@@ -37,11 +37,29 @@ function inWeek(course: Course, weekIndex: number): boolean {
   return weeks.length === 0 || weeks.includes(weekIndex);
 }
 
+/** 通知标题：一节课一条，标题直接说是哪门课。 */
+function titleOf(course: Course): string {
+  return `半小时后：${course.name}`;
+}
+
+/** 通知正文：时间段 + 第几节 + 地点 + 老师。 */
+function bodyOf(course: Course): string {
+  const span = `${course.startTime}-${course.endTime}`;
+  const sections =
+    course.sectionStart && course.sectionEnd ? `第${course.sectionStart}-${course.sectionEnd}节 ` : '';
+  const where = course.location ? ` @${course.location}` : '';
+  const teachers = course.teachers?.length ? ` · ${course.teachers.join('、')}` : '';
+  return `${span} ${sections}${where}${teachers}`.replace(/\s+/g, ' ').trim();
+}
+
 /**
  * 把未来若干天的课排成提醒块。
  *
- * 合并规则（用户要求）：上午/下午里连着的两节课只弹一条，正文把两节都交代清楚；
- * 跨午/跨夜的课不合并——那样一条通知会离第一节太早。
+ * 规则（用户要求，2026-10 改）：**一节课一条，开课前 30 分钟弹，不做任何合并**。
+ * 之前是把「同一半天、空档 ≤40 分钟的连堂课」并成一条 —— 上午满课时整上午只在
+ * 第一节前弹一次，第二节课就没有提醒了；现在每节课各自独立。
+ *
+ * 过点的课不补弹（`at` 已经过去的直接丢），避免一开 App 就糊一脸旧通知。
  */
 export function buildReminderBlocks(
   courses: Course[],
@@ -53,6 +71,8 @@ export function buildReminderBlocks(
   const nowMs = now.getTime();
   const today = todayShanghai(nowMs);
   const out: ReminderBlock[] = [];
+  /* 门户给「事件」、教务给「模板」，同一节课可能两边都有；按 日期+时间+课名 去重 */
+  const seen = new Set<string>();
 
   for (let i = 0; i < days; i += 1) {
     const date = addDays(today, i);
@@ -63,45 +83,18 @@ export function buildReminderBlocks(
       .filter((c) => c.weekday === weekday)
       .filter((c) => (weekIndex > 0 ? inWeek(c, weekIndex) : true))
       .sort((a, b) => hhmmToMin(a.startTime) - hhmmToMin(b.startTime));
-    if (list.length === 0) continue;
 
-    // 按"同半天 + 间隔 ≤ 15 分钟"切块
-    let group: Course[] = [];
-    const flush = () => {
-      if (group.length === 0) return;
-      const first = group[0]!;
-      const last = group[group.length - 1]!;
-      const startMin = hhmmToMin(first.startTime);
+    for (const course of list) {
+      const startMin = hhmmToMin(course.startTime);
       const atMs = at(date, minToHhmm(Math.max(startMin - LEAD_MIN, 0)));
-      if (atMs > nowMs) {
-        const span = `${first.startTime}-${last.endTime}`;
-        const body = group
-          .map((c) => `${c.startTime}-${c.endTime} ${c.name}${c.location ? ` @${c.location}` : ''}`)
-          .join('；');
-        out.push({
-          at: atMs,
-          title: group.length > 1 ? `半小时后有 ${group.length} 节课` : '半小时后有一节课',
-          body: `${span}｜${body}`,
-        });
-      }
-      group = [];
-    };
+      if (atMs <= nowMs) continue; // 已经过点，不补弹
 
-    for (const c of list) {
-      if (group.length === 0) {
-        group = [c];
-        continue;
-      }
-      const prev = group[group.length - 1]!;
-      const sameHalf = hhmmToMin(prev.startTime) < 12 * 60 === (hhmmToMin(c.startTime) < 12 * 60);
-      const gap = hhmmToMin(c.startTime) - hhmmToMin(prev.endTime);
-      if (sameHalf && gap <= GAP_MIN) group.push(c);
-      else {
-        flush();
-        group = [c];
-      }
+      const key = `${date}|${course.startTime}|${course.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push({ at: atMs, title: titleOf(course), body: bodyOf(course) });
     }
-    flush();
   }
 
   return out.sort((a, b) => a.at - b.at);

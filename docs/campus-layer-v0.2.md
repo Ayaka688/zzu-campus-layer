@@ -293,11 +293,16 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 
 ### 9.2.2 课前 30 分钟提醒（安卓壳）
 
-- `src/core/remind.ts`：`buildReminderBlocks(courses, {now, days, termStart})` 把课表切成提醒块——
-  `LEAD_MIN = 30`（开课前 30 分钟）、`GAP_MIN = 40`（同一半天、空档 ≤40 分钟的连堂课并成一条，
-  午休 130 分钟不会被并），过点丢弃，按时间排序；`pushReminders()` 交给壳。
-- 壳侧：`ReminderScheduler`（逐条 `AlarmManager`；Android 12+ 无精确闹钟权限时退 `setAndAllowWhileIdle`）+
-  `ReminderReceiver`（渠道 `class-reminder`，`BigTextStyle`）+ `BootReceiver`（开机/升级后恢复）。
+- `src/core/remind.ts`：`buildReminderBlocks(courses, {now, days, termStart})` 把课表排成提醒块——
+  **一节课一条，开课前 30 分钟（`LEAD_MIN = 30`）各弹一条，不做任何合并**；
+  正文 = `开始-结束 第N-M节 @教室 · 老师`，标题 = `半小时后：课名`。
+  同一节课被门户（事件）和教务（模板）重复给出时按 `日期|开始时间|课名` 去重；
+  已经过点的课不补弹（否则一开 App 就糊一脸旧通知）；过教学周过滤，最后按时间排序。`pushReminders()` 交给壳。
+  （旧行为是「同一半天、空档 ≤40 分钟的连堂课并成一条」，2026-10 按用户要求去掉——上午满课时整上午只在第一节前弹一次，第二节往后都没提醒。）
+- 壳侧：`ReminderScheduler`（逐条 `AlarmManager`；Android 12+ 无精确闹钟权限时退 `setAndAllowWhileIdle`；
+  requestCode = `(at/60000*37 + 序号) % MAX`，同一时刻撞课也能各响各的；**每次 apply 先撤上一批闹钟再重排**，
+  改课表/关开关不会留下旧闹钟）+ `ReminderReceiver`（渠道 `class-reminder`，`BigTextStyle`）+ `BootReceiver`（开机/升级后恢复）。
+- 关掉课前提醒开关时前端会 `pushReminders([])` 把已排闹钟一起撤掉。
 - 只有安卓壳有这条通道（PWA 没有系统通知权限）；浏览器里 `pushReminders` 直接返回 `false`。
 
 ### 9.2.3 本轮验收记录（2026-10-23）
@@ -307,6 +312,7 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 | 17 | 合并 PR #1 后全量回归 | `tsc` 0 错、**303 passed / 12 skipped**（25 文件）；合并前 PR 自己的 CI 是 `action_required`（fork 首贡献没人点 Approve），等于这 3417 行没被人验证过 |
 | 18 | 合并后收尾（`b5a22db`） | ①`scripts/e2e.mjs:314` 的 `search_notice` → `find_notices`（CI 不跑 e2e，不改会静默失效）；②`public/content/jwxt.js` 只认 `iss === 'cas.s.zzu.edu.cn'` 的票（PR 给 jwxt 开了 `all_frames:true`，防止把 iframe 里别人的票当登录态）；③补测试后 **305 passed / 12 skipped** |
 | 19 | 课前提醒 | `remind.test.ts` 5 例（单节 / 连堂合并 / 跨午不合并 / 过点不弹 / 教学周过滤）⇒ **244 passed**；`android` workflow 出 APK（artifact `campus-layer-debug-apk`） |
+| 20 | 课前提醒改**每节课各一条**（0.2.70） | 用户反馈「上午满课只在早上弹一次」。去掉 `GAP_MIN` 合并逻辑，`buildReminderBlocks()` 现在一节课一块：标题 `半小时后：课名`、`at = 开课 - 30 分钟`、正文带 `第N-M节 @教室 · 老师`；同一节课跨源（portal/jwxt）按 `日期|开始时间|课名` 去重；过点仍不补弹。`remind.test.ts` 扩到 8 例（提前量 30、正文带节次、连堂各一条、满课 5 节=5 条且时间递增、跨源去重、过点丢弃、教学周过滤、跨天不合并）⇒ **495 passed / 12 skipped**（37 文件）。壳侧 `ReminderScheduler` 同步硬化：requestCode 改 `(at/60000*37+i)%MAX`（撞课不互相覆盖）、`apply()` 先撤上一批闹钟、`SecurityException` 逐条兜底；关开关时前端 `pushReminders([])` 顺带撤闹钟 |
 
 ## 9.3 验收补充（2026-10-27，前端 0.2.52）
 
