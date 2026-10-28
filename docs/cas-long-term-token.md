@@ -379,6 +379,16 @@ npm run app:ticket -- --json       # {"idToken": "…", "leftH": 719.9, …}
   `passwordLogin` 一次——反正它零人工、100 ms，用不上刷新票。
 - **实测范围**：eams-door（`X-Id-Token` 与 `Authorization` 都 200）与新门户 `info.s.zzu.edu.cn/portal-api`
   都认这张票；新教务 `/student` 页面本体仍然只认它自己的 cookie 会话（§1.1），跟 CAS 票一样不吃。
+- **验证程度**：协议本身在 Node 里实测透了（CLI 出票 150 ms、`--verify` eams-door 200、reuse 分支剩 720 h），
+  安卓壳的 Java 版也编进了 0.2.71 的 APK（`classes2.dex` 里能查到 `AppMint` / `SWSuperApp` /
+  `passwordLogin` / `mfa/detect`），但**扩展里 `mintViaApp()` 的快路没在真浏览器跑过**
+  （本机没有 Chrome，Edge 起不来）；它与 CLI 是同一套协议、同样的 `fetch`，差别只在于扩展不受 CORS 限制。
+  真跑出问题时，`mintIntoSession()` 会自动落到 CAS 那条路上，不会卡死。
+- **可信设备的有效期未知**：只知道登记后立刻 `need=false`，不知道多久失效、也不知道吊销后表现如何。
+  真失效的表现是 `need` 变回 true → 上层退 CAS 慢路 → 提示重登。
+- **首次登记目前只能从电脑上做**：手机上填了账密也只是把凭据存到 `localStorage`，第一次的短信验证
+  还得在电脑跑 `npm run app:login`（或者等你手动抓一次真机的 deviceId）。壳里的「绑定向导」
+  （App 内发短信 + 输入 6 位码）是下一步要补的东西；在那之前，安卓端第一次仍会退到登录页。
 
 ### 10.6 与旧方案的关系
 
