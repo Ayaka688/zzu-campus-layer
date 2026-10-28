@@ -1,7 +1,7 @@
 {
   "name": "zzu-campus-layer",
   "private": true,
-  "version": "0.2.70",
+  "version": "0.2.71",
   "type": "module",
   "description": "郑州大学「校园信息层」——基于实测 API 的 MV3 侧边栏助手",
   "scripts": {
@@ -14,6 +14,9 @@
     "cas:login": "node scripts/cas-login.mjs",
     "cas:ticket": "node scripts/cas-ticket.mjs --verify",
     "cas:fresh": "node scripts/cas-ticket.mjs --if-stale=6.5 --verify",
+    "app:login": "node scripts/app-login.mjs",
+    "app:ticket": "node scripts/app-ticket.mjs --verify",
+    "app:fresh": "node scripts/app-ticket.mjs --if-stale=24 --verify",
     "e2e": "node scripts/e2e.mjs",
     "pwa:serve": "node scripts/serve-pwa.mjs",
     "pwa:shot": "node scripts/pwa-shot.mjs",

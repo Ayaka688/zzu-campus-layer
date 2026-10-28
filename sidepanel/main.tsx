@@ -1,6 +1,7 @@
 import { render } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { LlmFields } from '../src/ui/llm-fields';
+import { AppCreds } from '../src/ui/app-creds';
 import { HoldButton } from '../src/ui/hold';
 import { Toast, type ToastState } from '../src/ui/toast';
 import { QuickAskBar, QuickAskEditor } from '../src/ui/quick-asks';
@@ -433,6 +434,7 @@ function App() {
           <p class="hint">
             模型只决定「调哪个工具」，课表通知内容仍由模板渲染。{saveNote ? ` ${saveNote}` : ''}
           </p>
+          <AppCreds />
           <div class="sync">
             <div class="row">
               <button class="mini" onClick={() => void makeBundle()} disabled={!!bundleBusy}>

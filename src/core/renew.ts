@@ -4,15 +4,20 @@
  * 票本身很短：门户票 8 小时（教务那张 30 天是老 App 设备注册才签的，H5 拿不到）。
  * 但 CAS 那边的会话很长（TGC 14 天），所以只要拿它再走一次 CAS 就能换新票。
  *
- * 两条路，优先走快的：
- * 1. **fetch 快路**（`casMint.ts`）：一条 HTTPS 请求，CAS 会话还在就 302 带 ticket 回来。
- *    扩展里可用（host_permissions 豁免 CORS），不开标签页、不闪、200 ms 级。
+ * 三条路，优先走快的：
+ * 0. **账密直换**（`appMint.ts`）：绑过学号密码的话，一条请求换 **30 天**的票
+ *    （`/token/password/passwordLogin`），扩展里可用（host_permissions 豁免 CORS）。
+ *    手机壳里由 Java 侧的 `AppMint` 做同一件事。
+ * 1. **fetch 快路**（`casMint.ts`）：一条 HTTPS 请求，CAS 会话还在就 302 带 ticket 回来，
+ *    换到的是 8 小时的票。
  * 2. **标签页慢路**（本文件下半段）：PWA/网页版没有豁免时，后台开一个非激活标签页，
  *    让浏览器自己走 CAS，内容脚本把新票上报回来。
  *
  * 都不做定时任务：票快到期（<2 h）或有请求失败时才续，安卓上休眠多久都不影响。
  */
+import { mintViaApp } from './appMint';
 import { mintViaFetch } from './casMint';
+import { getAppCreds } from './creds';
 import { saveToken, tokenStatuses, type TokenStatus } from './storage';
 
 /** 冷却：同一段时间内只自动试一次（慢路用；快路另有秒级节流） */
@@ -147,13 +152,25 @@ export async function ensureFresh(marginMs = REFRESH_MARGIN_MS): Promise<boolean
 let mintingAt = 0;
 
 /**
- * fetch 快路：CAS 会话还在就换一张新票，落库到 jwxt / portal 两个槽位
+ * 换票：先试账密直换（30 天票），没绑密码 / 这台设备还没过 MFA / 请求失败，
+ * 再退到 CAS 会话那条（8 小时票）。换到的票同一张写 jwxt / portal 两个槽位
  * （实测同一张 idToken 两边都认，见 docs/cas-long-term-token.md §7）。
- * 换不到（会话过期、或不在扩展里）返回 false，调用方再走标签页慢路。
  */
 export async function mintIntoSession(now = Date.now()): Promise<boolean> {
   if (now - mintingAt < MINT_THROTTLE_MS) return false;
   mintingAt = now;
+
+  const creds = await getAppCreds();
+  if (creds) {
+    const byPassword = await mintViaApp(creds);
+    if (byPassword.ok) {
+      await saveToken('jwxt', byPassword.idToken);
+      await saveToken('portal', byPassword.idToken);
+      await writeLast(now);
+      return true;
+    }
+  }
+
   const minted = await mintViaFetch();
   if (!minted) return false;
   await saveToken('jwxt', minted.idToken);

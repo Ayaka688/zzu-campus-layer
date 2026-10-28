@@ -218,25 +218,53 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 续票的两级台阶：
-     * 1. {@link CasMint} 纯 Java 请求（不闪页面，200 ms 级）——扩展里那条 fetch 快路的原生版；
-     * 2. 换不到（CAS 会话真过期了）才让 LoginActivity 静默走一遍登录页，那里可能还得补一次 MFA。
+     * 续票的三级台阶，越靠前越省事：
+     * 1. {@link AppMint}：学号密码直换 **30 天**的票（学校 App 那套接口；设备可信时不需要验证码）；
+     * 2. {@link CasMint}：CAS 的 TGT cookie 还在的话，一条请求换 8 小时的票（不闪页面）；
+     * 3. 都不行才让 LoginActivity 静默走一遍登录页，那里可能还得补一次 MFA。
      */
     private void renewQuickly() {
-        /* 必须按 /cas/ 这个路径取：TGC / SESSION / CAS_TRACE_ID 的 Path 都是 /cas/，
-           用站点根路径去问只会拿到空串（CookieManager 是按路径匹配的）。 */
-        final String cookies = CookieManager.getInstance().getCookie("https://cas.s.zzu.edu.cn/cas/");
-        new Thread(() -> {
-            final String link = CasMint.mint(cookies);
-            runOnUiThread(() -> {
-                if (link != null) {
-                    inject(link, false);
-                } else {
-                    startActivityForResult(
-                            new Intent(MainActivity.this, LoginActivity.class).putExtra("silent", true), REQ_LOGIN);
-                }
-            });
-        }, "cas-mint").start();
+        if (web == null) {
+            return;
+        }
+        // 先把 PWA 存在 localStorage 里的学号密码读出来（没绑过就是空串，直接跳过第一级）
+        web.evaluateJavascript("(function(){try{return localStorage.getItem('campus-layer:appCreds')||''}catch(e){return ''}})()",
+                value -> {
+                    final String credsJson = jsString(value);
+                    /* 必须按 /cas/ 这个路径取：TGC / SESSION / CAS_TRACE_ID 的 Path 都是 /cas/，
+                       用站点根路径去问只会拿到空串（CookieManager 是按路径匹配的）。 */
+                    final String cookies = CookieManager.getInstance().getCookie("https://cas.s.zzu.edu.cn/cas/");
+                    new Thread(() -> {
+                        String link = null;
+                        if (!credsJson.isEmpty()) {
+                            link = AppMint.mint(credsJson);
+                        }
+                        if (link == null) {
+                            link = CasMint.mint(cookies);
+                        }
+                        final String out = link;
+                        runOnUiThread(() -> {
+                            if (out != null) {
+                                inject(out, false);
+                            } else {
+                                startActivityForResult(new Intent(MainActivity.this, LoginActivity.class)
+                                        .putExtra("silent", true), REQ_LOGIN);
+                            }
+                        });
+                    }, "renew-mint").start();
+                });
+    }
+
+    /** evaluateJavascript 的结果是 JSON 字面量（带引号或 null），拆成普通字符串。 */
+    private static String jsString(String value) {
+        if (value == null || value.isEmpty() || "null".equals(value)) {
+            return "";
+        }
+        try {
+            return new org.json.JSONArray("[" + value + "]").getString(0);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     /** Android 13+ 通知要用户授权，没有就当场问一次。 */

@@ -330,6 +330,7 @@ v0.1 假设「用 content script 解析教务网页的 DOM」。实测后这一�
 | 28 | 长按预约按钮：**宋体** + 按住后红色进度条自左向右跑满 1.2 秒才提交，松手取消 | `pwa/style.css` 的 `.hold-btn` / `.fill` / `.active` |
 | 29 | 蓝绿（teal）配色：模型气泡由白色 `--panel` 改为同族墨绿不透明面、正文近白、去掉半透明 | `html[data-theme='teal'] .bubble` 一组覆盖 |
 | 30 | 更新链路：`pwa-sw.js` 缓存名 `campus-layer-v8` + `skipWaiting`/`clients.claim`；注册 `{ updateViaCache: 'none' }` + `reg.update()` + 新 SW 就绪后自动 reload；壳在版本号变化时 `web.clearCache(true)` | 线上核对：`assets/pwa-*.js` 内含当前版本号；壳杀进程重开后版本号前进 |
+| 31 | 续票换成**账密直换 30 天票**（学校 App 的 `/token/` 端点族）：`appMint.ts` 手写 RSA PKCS#1 v1.5 + `fetch`；`deviceId` 过一次短信即成为可信设备，之后零人工；扩展/安卓壳（`AppMint.java`）/CLI（`scripts/app-*.mjs`）三处共用同一协议 | `test/appmint.test.ts` 19 例（含用 Node `privateDecrypt` 解回原文）；实网 74–113 ms、720 h、eams-door 200；`cas:*` 降级为兜底 |
 
 **本轮仍未做（明确记录）**
 - 图书馆座位图依赖该站自身登录态（与学校 CAS 是两套账号），且**同一时间只允许一台设备在线**；

@@ -20,6 +20,7 @@ import {
   type TokenStatus,
 } from '../src/core/storage';
 import { LlmFields } from '../src/ui/llm-fields';
+import { AppCreds } from '../src/ui/app-creds';
 import { QuickAskBar, QuickAskEditor } from '../src/ui/quick-asks';
 import { CampusMap, RichText, download } from '../src/ui/rich';
 import {
@@ -867,6 +868,8 @@ const looksAuthLost = (msg: string): boolean => AUTH_LOST_RE.test(msg);
             </button>
           </div>
           {testNote ? <p class={testNote.startsWith('连通') ? 'hint ok' : 'hint warn'}>{testNote}</p> : null}
+
+          <AppCreds browserOnly />
         </section>
       )}
 

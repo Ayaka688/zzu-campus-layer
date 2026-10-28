@@ -164,6 +164,9 @@ curl -H "X-Id-Token: <idToken>" https://jwxt.zzu.edu.cn/eams-door/api/v1/portal/
 
 ## 5. 为什么拿不到 30 天票（诚实记录）
 
+> **已解开，见 §10**：30 天票不在这套 `/cas/` 端点上，而在学校 App 用的 `/token/` 端点族里
+> （`/token/password/passwordLogin`）。下面这段保留为「从 `/cas/` 侧尝试过什么」的记录。
+
 仓库里那张历史 30 天票（`tmp/zzu/jwxt-token.txt`）与 H5 票的差异：
 
 | | H5 票（uniapp.s / ehall.s） | 历史 30 天票 |
@@ -271,7 +274,13 @@ TGC 剩余 335.7h（2026-11-11T04:48:15.000Z）
 | `scripts/cas-ticket.mjs` | TGC → JWT ticket → `idToken`；`ensureIdToken()` 按需换票、`tgcStatus()` 看 TGC 寿命；`--if-stale=6.5` / `--force` / `--verify` / `--json`；退出码 3 = TGC 死了该重登 |
 | `.cas-state/` | `cas-jar.json` / `cas-ticket.txt` / `cas-idtoken.txt` / `cas-meta.json` / `sms-code.txt` / `cas-qr.png`（整个目录可拷到别的设备用） |
 | `src/core/casMint.ts` | 浏览器内的**一条 fetch 换票**（`mintViaFetch()`）：靠扩展的 `host_permissions` 带 Cookie 访问 CAS，读到 302 后的 `response.url` 就能抠出 ticket |
-| `src/core/renew.ts` | 续票入口：`needsRefresh()`（剩 <2 h 就该换）、`ensureFresh()`（按需）、`mintIntoSession()`（fetch 快路 → 落库）、`renewFromCas()`（标签页慢路，PWA 用） |
+| `src/core/renew.ts` | 续票入口：`needsRefresh()`（剩 <2 h 就该换）、`ensureFresh()`（按需）、`mintIntoSession()`（账密 30 天 → CAS fetch 8h → 落库）、`renewFromCas()`（标签页慢路，PWA 用） |
+| `src/core/appMint.ts` | 浏览器内**账密直换 30 天票**（`mintViaApp()`）：手写 RSA PKCS#1 v1.5 + `fetch`，不需要 cookie、不需要浏览器 |
+| `src/core/creds.ts` | 学号/密码/deviceId 的本机存储（KV key `appCreds`），`newDeviceId()` 生成 `zzu-layer-<16 hex>` |
+| `src/ui/app-creds.tsx` | 侧边栏与 PWA 设置里的「学号密码」表单（`<AppCreds />`） |
+| `scripts/app-login.mjs` | 一次性绑定（§10.3）：短信验证一次 → 登记可信设备 → 立刻换一张 30 天票 |
+| `scripts/app-ticket.mjs` | 账密换 30 天票：`ensureAppToken()` / `mintAppToken()` / `verifyToken()` / `deviceStatus()`；`--if-stale=24` / `--force` / `--verify` / `--json` |
+| `mobile/.../AppMint.java` | 安卓壳里的同一套协议（纯 `HttpURLConnection` + 手写 RSA），续票第一级台阶 |
 
 ### 9.1 浏览器里怎么用（扩展 = 快路；PWA/App = 慢路）
 
@@ -297,4 +306,89 @@ GET https://cas.s.zzu.edu.cn/cas/s/login?service=https://uniapp.s.zzu.edu.cn/
      那里可能还要补一次短信/扫码 MFA。
 - 注意取 cookie 的路径必须是 `/cas/`：`CookieManager.getCookie()` 按路径匹配，
   用站点根路径问会拿到空串，快路会静默失败（踩过一次）。
+
+---
+
+## 10. 更好的那条路：学号+密码直换 **30 天**票（App 端点族）
+
+§1–§9 那一整套（CAS 表单、MFA、TGC、8 小时票）是在 `/cas/` 上找票。学校「豫见郑大」App 走的是
+**另一套端点在 `/token/` 下**，能直接签 30 天的票，而且不需要浏览器。
+
+灵感来源：`https://github.com/Illustar0/ZZU.Py`（Python 版封装）。下面是实测（2026-10）的结论。
+
+### 10.1 协议
+
+```
+GET  https://cas.s.zzu.edu.cn/token/jwt/publicKey
+     → 200，444 B，和 /cas/jwt/publicKey 是同一把 RSA 公钥（PEM 或裸 base64 都行）
+
+POST https://cas.s.zzu.edu.cn/token/mfa/detect?username=<__RSA__…>&password=<__RSA__…>&deviceId=<id>
+     → { "code":0, "data": { "need": true, "state": "ETFwJM", … } }
+       need:false = 这台设备已是「可信设备」，可以直接登录（不要验证码）
+
+POST https://cas.s.zzu.edu.cn/token/password/passwordLogin?username=<__RSA__…>&password=<__RSA__…>
+     &appId=com.supwisdom.zzu&osType=android&geo=&deviceId=<id>&clientId=&mfaState=<state>
+     → { "code":0, "data": { "idToken": "…", "refreshToken": "…" } }
+```
+
+- Header 用 `User-Agent: SWSuperApp/1.1.1()`（取自 ZZU.Py 的 `f"{APP_VERSION}()"`）；取公钥时用 `okhttp/3.12.1` 也成。
+- `<__RSA__…>` = RSA **PKCS#1 v1.5** 加密 → base64 → 前面加 `__RSA__` → **URL 编码**（base64 里有 `+ / =`）。
+- 两个票的真实寿命（解码 jwt 实测）：`idToken` **720 h = 30 天**（`req=com.supwisdom.zzu`、带 `deviceId`、
+  jti `Id-Token-…`）；`refreshToken` **1440 h = 60 天**（jti `Refresh-Token-…`）。
+- 单次换票耗时 **74–113 ms**（两次实测）。
+
+### 10.2 关键：deviceId + 可信设备
+
+- `mfa/detect` 只看 `username` + `deviceId`（`password` 可选）。**同一台设备过一次 MFA 后，`need` 变 `false`。**
+- 实测：`zzu-probe-mvrum1j6` 过完短信 → 再 detect `need:false`；随手新造 `zzu-probe-mvruv4hq` → `need:true`。
+  于是「一次人工短信 → 之后纯账密、零人工、100 ms 换 30 天票」成立（连做两次 A/B 都是 720 h）。
+- 可信设备也可以在安全中心看/管：`https://authx-service.s.zzu.edu.cn/security-center/eqIP-management`。
+- 可信设备多久失效没测出来（只知道刚登记就生效）。所以 `deviceId` 要**持久化**：丢了就等于换了台新机器。
+
+### 10.3 第一次怎么绑定（一次短信）
+
+```powershell
+$env:ZZU_USER='2026150xxxxx'; $env:ZZU_PASS='…'
+npm run app:login
+#   打印「短信已发到 195****7500」，把收到的 4~6 位码写进 .cas-state/sms-code.txt
+#   成功后 .cas-state/app.json 里记下 account / password / deviceId / trustedAt
+```
+
+之后（不需要任何人工、不需要浏览器）：
+
+```powershell
+npm run app:ticket -- --verify     # 需要就换一张 30 天票，然后打 eams-door 验一次
+npm run app:ticket -- --if-stale=24
+npm run app:ticket -- --json       # {"idToken": "…", "leftH": 719.9, …}
+```
+
+### 10.4 在三个宿主里怎么用
+
+| 宿主 | 能不能直接调 `/token/` | 做法 |
+| --- | --- | --- |
+| 浏览器扩展 | **能**（`host_permissions` 含 `cas.s.zzu.edu.cn`，不受 CORS 限制） | `src/core/renew.ts` 的 `mintIntoSession()` 先试 `mintViaApp()`（`src/core/appMint.ts`：手写 RSA PKCS#1 v1.5 + 原生 `fetch`），失败再落 `/cas/` fetch 快路 |
+| PWA（网页） | **不能**：`cas.s.zzu.edu.cn/token/*` 没有任何 `Access-Control-Allow-Origin`，预检 403 | 设置里填学号密码（存 `localStorage` 的 `campus-layer:appCreds`），交给壳去做 |
+| 安卓壳 | **能**（原生） | `AppMint.java`：读 PWA 的 `localStorage` 凭据 → 纯 `HttpURLConnection` 换票 → 交给页面 `__campusImport`；失败才退 `CasMint`，再失败才开登录页 |
+
+于是安卓端的续票顺序是 **AppMint（30 天，静默）→ CasMint（8 小时，靠 TGC）→ 登录页（要人工 MFA）**。
+
+### 10.5 两个诚实的限制
+
+- **`refreshToken` 目前没有可用端点**：`/token/password/refreshToken`、`/token/password/refresh` 都回
+  `400 exception.mfa.verify.error`（被 MFA 过滤器挡住），`/token/oauth/token` 404。所以 30 天到期就再
+  `passwordLogin` 一次——反正它零人工、100 ms，用不上刷新票。
+- **实测范围**：eams-door（`X-Id-Token` 与 `Authorization` 都 200）与新门户 `info.s.zzu.edu.cn/portal-api`
+  都认这张票；新教务 `/student` 页面本体仍然只认它自己的 cookie 会话（§1.1），跟 CAS 票一样不吃。
+
+### 10.6 与旧方案的关系
+
+| | §2–§9（`/cas/` + TGC） | §10（`/token/` + 账密） |
+| --- | --- | --- |
+| 票寿命 | 8 h（TGC 14 天兜底） | **30 天**（+60 天 refresh） |
+| 需要浏览器 | 扩展/壳要带 cookie 或开标签页 | **不需要** |
+| 人工 | 14 天一次扫码/短信 | 一次性（换设备/清数据才要） |
+| 前置条件 | CAS 会话（TGC） | 学号密码 + 一个可信 deviceId |
+
+旧的 TGC 路线保留作兜底：没填账密、或设备被吊销时仍然能用。
+
 

@@ -21,10 +21,12 @@ dist/
 
 # 本地私货：千万别提交
 #   .cas-state/               CAS 登录态（TGC cookie / idToken / 账号密码）
+#   .cas-state/app.json       学号密码 + deviceId（30 天票那条路）
 #   tmp/zzu/jwxt-token.txt  campus 的 X-Id-Token
 #   tmp/zzu/token.txt       门户 userToken
 #   tmp/zzu/chat-key.txt    模型 sk- key
 .cas-state/
+.cas-state-*/
 tmp/
 .env
 .env.*
