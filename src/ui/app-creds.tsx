@@ -92,14 +92,20 @@ export function AppCreds({ browserOnly = false }: Props) {
 
   async function doBind() {
     setNote('');
+    const useSaved = Boolean(saved) && !password && account.trim() === (saved?.account ?? '');
     let creds: StoredAppCreds;
-    try {
-      creds = await saveAppCreds({ account, password });
-      setSaved(creds);
-      setPassword('');
-    } catch (err) {
-      setNote(err instanceof Error ? err.message : '保存失败');
-      return;
+    if (useSaved && saved) {
+      // 密码已经存过了：不用再敲一遍（上一次失败后密码框是空的，不能让它把按钮卡死）
+      creds = saved;
+    } else {
+      try {
+        creds = await saveAppCreds({ account, password });
+        setSaved(creds);
+        setPassword('');
+      } catch (err) {
+        setNote(err instanceof Error ? err.message : '保存失败');
+        return;
+      }
     }
 
     if (mode === 'none') {
@@ -186,6 +192,9 @@ export function AppCreds({ browserOnly = false }: Props) {
 
   const busy = phase.kind === 'busy';
   const inCode = phase.kind === 'code';
+  // 密码框空着、但存过同一学号的密码 → 允许直接点（省得每次失败都要重敲）
+  const canUseSaved = Boolean(saved) && !password && account.trim() === (saved?.account ?? '');
+  const canBind = Boolean(password) || canUseSaved;
 
   return (
     <div class="llm-fields">
@@ -229,7 +238,7 @@ export function AppCreds({ browserOnly = false }: Props) {
           <button
             class="mini"
             onClick={() => void doBind()}
-            disabled={busy || !account.trim() || !password}
+            disabled={busy || !account.trim() || !canBind}
           >
             {busy ? (phase.what ?? '处理中…') : '绑定（换 30 天票）'}
           </button>
@@ -263,6 +272,7 @@ export function AppCreds({ browserOnly = false }: Props) {
       {saved && !saved.trustedAt && mode === 'shell' && (
         <p class="hint">
           点「绑定」会给你发一条短信（学校按设备认人）：填一次码，这台手机就登记成可信设备了。
+          {canUseSaved ? '密码已经存过了，直接点就行。' : ''}
         </p>
       )}
       {saved && !saved.trustedAt && mode === 'none' && (

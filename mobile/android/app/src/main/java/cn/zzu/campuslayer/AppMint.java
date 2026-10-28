@@ -109,12 +109,27 @@ final class AppMint {
     }
 
     static String post(String url) throws Exception {
+        return postResp(url).body;
+    }
+
+    /** 带状态码的 POST：出错时要把 HTTP status 报出来，不然 500 的 HTML/JSON 会被误读成「账号不对」。 */
+    static final class Resp {
+        final int status;
+        final String body;
+
+        Resp(int status, String body) {
+            this.status = status;
+            this.body = body;
+        }
+    }
+
+    static Resp postResp(String url) throws Exception {
         HttpURLConnection c = open(url, UA);
         c.setRequestMethod("POST");
         c.setDoOutput(false);
         try {
             int code = c.getResponseCode();
-            return read(c, code);
+            return new Resp(code, read(c, code));
         } finally {
             c.disconnect();
         }
@@ -256,10 +271,13 @@ final class AppMint {
                 ps[i] = 0x01; // 填充字节必须非零
             }
         }
-        // EM = 0x00 || 0x01 || PS(0xFF…) || 0x00 || M ，总长固定 k 字节
+        // EM = 0x00 || 0x02 || PS(随机非零) || 0x00 || M ，总长固定 k 字节
+        // 注意块类型是 0x02（公钥加密），不是 0x01（那是签名用的）。
+        // 写成 0x01 服务端解不开，直接回 HTTP 500「解密字符串[...]」，
+        // 前端只会看到一句莫名其妙的失败——0.2.73 之前就是这个坑。
         byte[] em = new byte[k];
         em[0] = 0x00;
-        em[1] = 0x01;
+        em[1] = 0x02;
         System.arraycopy(ps, 0, em, 2, ps.length);
         em[2 + ps.length] = 0x00;
         System.arraycopy(msg, 0, em, 3 + ps.length, msg.length);

@@ -56,9 +56,11 @@ final class AppBind {
             String detectUrl = BASE + "/token/mfa/detect?username=" + AppMint.enc(AppMint.rsaEncrypt(key, account))
                     + "&password=" + AppMint.enc(AppMint.rsaEncrypt(key, password))
                     + "&deviceId=" + AppMint.enc(deviceId);
-            JSONObject detect = new JSONObject(AppMint.post(detectUrl));
+            AppMint.Resp dr = AppMint.postResp(detectUrl);
+            JSONObject detect = new JSONObject(dr.body);
             if (detect.optInt("code", -1) != 0) {
-                return error("学校没认出这个账号");
+                String msg = detect.optString("message", detect.optString("error", ""));
+                return error("学校不认这个账号（HTTP " + dr.status + (msg.isEmpty() ? "" : "：" + shorten(msg)) + "）");
             }
             JSONObject ddata = detect.optJSONObject("data");
             if (ddata == null) {
@@ -66,10 +68,12 @@ final class AppBind {
             }
             if (!ddata.optBoolean("need", true)) {
                 // 这台设备已经登记过了：不用验，直接换票。
+                // 另一种可能是密码不对——学校的 detect 对错密码也回 need:false（很阴），
+                // 所以这里换票失败时要把两种可能是都摆出来。
                 String token = AppMint.mint(credsJson);
                 return token != null && !token.isEmpty()
                         ? done(token)
-                        : error("设备已登记，但换票没成（网络？）");
+                        : error("学校说这台设备已登记，但换票没成——多半是密码不对，也可能是网络");
             }
 
             String state = ddata.optString("state", "");
@@ -91,9 +95,11 @@ final class AppBind {
 
             JSONObject body = new JSONObject();
             body.put("gid", gid);
-            JSONObject send = new JSONObject(postJson(attest + "/api/guard/securephone/send", body.toString()));
+            AppMint.Resp sr = postJsonResp(attest + "/api/guard/securephone/send", body.toString());
+            JSONObject send = new JSONObject(sr.body);
             if (send.optInt("code", -1) != 0) {
-                return error(send.optString("message", "短信没发出去"));
+                String msg = send.optString("message", "");
+                return error("短信没发出去（HTTP " + sr.status + (msg.isEmpty() ? "" : "：" + shorten(msg)) + "）");
             }
 
             pendingGid = gid;
@@ -145,6 +151,12 @@ final class AppBind {
 
     // ---- 结果拼装 ----
 
+    /** 服务端的 message 可能是一大段（500 时是解密堆栈），截一下别把设置页撑爆。 */
+    private static String shorten(String s) {
+        String t = s == null ? "" : s.replaceAll("\\s+", " ").trim();
+        return t.length() > 120 ? t.substring(0, 120) + "…" : t;
+    }
+
     private static String done(String idToken) {
         try {
             JSONObject out = new JSONObject();
@@ -170,6 +182,10 @@ final class AppBind {
     // ---- HTTP（POST + JSON body） ----
 
     private static String postJson(String url, String body) throws Exception {
+        return postJsonResp(url, body).body;
+    }
+
+    private static AppMint.Resp postJsonResp(String url, String body) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(TIMEOUT_MS);
         c.setReadTimeout(TIMEOUT_MS);
@@ -184,7 +200,7 @@ final class AppBind {
             c.setFixedLengthStreamingMode(payload.length);
             c.getOutputStream().write(payload);
             int code = c.getResponseCode();
-            return AppMint.read(c, code);
+            return new AppMint.Resp(code, AppMint.read(c, code));
         } finally {
             c.disconnect();
         }
