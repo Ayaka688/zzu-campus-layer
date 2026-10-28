@@ -102,7 +102,7 @@ public class LoginActivity extends Activity {
                     String[] parts = raw.isEmpty() ? new String[0] : raw.split("\n");
                     String local = parts.length > 1 && isJwt(parts[1]) ? parts[1] : "";
                     String fromUrl = parts.length > 0 ? ticketPayload(parts[0]) : "";
-                    String best = pickLonger(local, fromUrl);
+                    String best = waitForLocal(local, fromUrl);
                     if (best != null) {
                         finishWithPayload(best);
                         return;
@@ -140,7 +140,7 @@ public class LoginActivity extends Activity {
                     String local = parts.length > 1 && isJwt(parts[1]) ? parts[1] : "";
                     String fromUrl = !urlTicket.isEmpty() ? ticketPayload(urlTicket)
                             : (parts.length > 0 ? ticketPayload(parts[0]) : "");
-                    String best = pickLonger(local, fromUrl);
+                    String best = waitForLocal(local, fromUrl);
                     if (best != null) {
                         finishWithPayload(best);
                     } else if (!urlTicket.isEmpty()) {
@@ -220,6 +220,16 @@ public class LoginActivity extends Activity {
         int amp = tk.indexOf('&');
         if (amp >= 0) tk = tk.substring(0, amp);
         return tk.indexOf('.') > 0 ? url : "";
+    }
+
+    /** 门户首页还没写 localStorage 时先别急着用短票：只有本地票确实更长才收工。 */
+    private String waitForLocal(String local, String fromUrl) {
+        double l = isJwt(local) ? leftHours(local) : -1;
+        double u = fromUrl != null && !fromUrl.isEmpty() ? leftHours(fromUrl) : -1;
+        if (l > 0 && l >= u) return local;
+        if (u <= 0) return null;
+        // 只有「本来就没有 URL 短票」时才直接用它；否则等门户写长票
+        return urlTicket.isEmpty() ? fromUrl : null;
     }
 
     /** 两个候选里选剩余时间更长的；都不行返回 null。 */
@@ -308,6 +318,7 @@ public class LoginActivity extends Activity {
     }
 
     private void finishWithPayload(String payload) {
+        try { android.widget.Toast.makeText(this, "登录态剩余 " + Math.round(leftHours(payload)) + " 小时", android.widget.Toast.LENGTH_LONG).show(); } catch (Throwable ignored) { }
         if (done) {
             return;
         }
