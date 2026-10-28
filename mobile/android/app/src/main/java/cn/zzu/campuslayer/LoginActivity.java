@@ -25,6 +25,10 @@ public class LoginActivity extends Activity {
 
     private boolean silent = false;
 
+    /** 静默续期的硬上限：CAS 若弹了登录表单（TGT 过期），再等也不会自己好。 */
+    private static final long SILENT_DEADLINE_MS = 12_000;
+    private Runnable silentDeadline;
+
     private WebView web;
     private boolean done;
 
@@ -36,8 +40,28 @@ public class LoginActivity extends Activity {
         web = new WebView(this);
         if (silent) {
             // 静默续期：不占屏幕、不给用户任何感知
+            // 注意：只 setAlpha(0) 时窗口本身还是黑的，用户会看到「黑屏」
+            try {
+                getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0x00000000));
+                getWindow().setDimAmount(0f);
+            } catch (Throwable ignored) {
+                // 老系统不支持就算了
+            }
             web.setAlpha(0f);
             setContentView(web, new ViewGroup.LayoutParams(1, 1));
+            // 12 秒没拿到票就当「需要人工」：直接结束，让外面自动打开可见登录页
+            silentDeadline = new Runnable() {
+                @Override
+                public void run() {
+                    if (done) {
+                        return;
+                    }
+                    done = true;
+                    setResult(RESULT_CANCELED);
+                    finish();
+                }
+            };
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(silentDeadline, SILENT_DEADLINE_MS);
         } else {
             setContentView(web, new ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -112,6 +136,19 @@ public class LoginActivity extends Activity {
                         finishWithPayload(parts[1]);
                     }
                 });
+                if (silent) {
+                    // 已经落到登录表单上了，再等一秒也没意义
+                    web.evaluateJavascript(
+                            "(function(){var a=document.querySelector('input[name=\"username\"],#username,#un,#userName');"
+                                    + "var p=document.querySelector('input[type=password]');return (a&&p)?'1':'0';})()",
+                            v -> {
+                                if (!done && v != null && v.contains("1")) {
+                                    done = true;
+                                    setResult(RESULT_CANCELED);
+                                    finish();
+                                }
+                            });
+                }
                 pollCount++;
                 if (!done && pollCount < 40) {
                     poller.postDelayed(this, 1500);
@@ -235,6 +272,10 @@ public class LoginActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (silentDeadline != null) {
+            new android.os.Handler(android.os.Looper.getMainLooper()).removeCallbacks(silentDeadline);
+            silentDeadline = null;
+        }
         if (poller != null) {
             poller.removeCallbacksAndMessages(null);
         }
